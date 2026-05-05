@@ -2,6 +2,8 @@ package com.smartisanos.music.playback
 
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import com.smartisanos.music.isExternalAudioLaunchItem
+import kotlin.random.Random
 
 internal fun Player?.replaceQueueAndPlay(
     mediaItems: List<MediaItem>,
@@ -18,6 +20,70 @@ internal fun Player?.replaceQueueAndPlay(
     player.setMediaItems(mediaItems, safeStartIndex, 0L)
     player.prepare()
     player.play()
+}
+
+internal fun Player?.replaceQueueAndPlayShuffled(
+    mediaItems: List<MediaItem>,
+    random: Random = Random.Default,
+) {
+    val player = this ?: return
+    if (mediaItems.isEmpty()) {
+        return
+    }
+    player.replaceQueueAndPlay(
+        mediaItems = mediaItems,
+        startIndex = random.nextInt(mediaItems.size),
+        shuffleModeEnabled = true,
+    )
+}
+
+internal val MediaItem.stableKey: String?
+    get() = mediaMetadata.extras
+        ?.getString(LocalAudioLibrary.StableKeyExtraKey)
+        ?.trim()
+        ?.takeIf(String::isNotEmpty)
+
+internal fun Player.deduplicateQueueCandidates(candidates: List<MediaItem>): List<MediaItem> {
+    if (candidates.isEmpty()) {
+        return emptyList()
+    }
+    val seenStableKeys = linkedSetOf<String>()
+    val seenMediaIds = linkedSetOf<String>()
+    val seenMediaIdsWithoutStableKey = linkedSetOf<String>()
+    for (index in 0 until mediaItemCount) {
+        val item = getMediaItemAt(index)
+        val mediaId = item.mediaId.trim().takeIf(String::isNotEmpty)
+        val stableKey = item.stableKey
+        stableKey?.let(seenStableKeys::add)
+        mediaId?.let(seenMediaIds::add)
+        if (stableKey == null) {
+            mediaId?.let(seenMediaIdsWithoutStableKey::add)
+        }
+    }
+    return candidates.filter { item ->
+        if (item.isExternalAudioLaunchItem()) {
+            return@filter true
+        }
+        val stableKey = item.stableKey
+        val mediaId = item.mediaId.trim()
+        val normalizedMediaId = mediaId.takeIf(String::isNotEmpty)
+        val alreadyQueued = if (stableKey != null) {
+            stableKey in seenStableKeys ||
+                normalizedMediaId?.let(seenMediaIdsWithoutStableKey::contains) == true
+        } else {
+            normalizedMediaId?.let(seenMediaIds::contains) == true
+        }
+        if (alreadyQueued) {
+            false
+        } else {
+            stableKey?.let(seenStableKeys::add)
+            normalizedMediaId?.let(seenMediaIds::add)
+            if (stableKey == null) {
+                normalizedMediaId?.let(seenMediaIdsWithoutStableKey::add)
+            }
+            true
+        }
+    }
 }
 
 internal fun Player?.removeMediaItemsByMediaIds(mediaIds: Set<String>) {

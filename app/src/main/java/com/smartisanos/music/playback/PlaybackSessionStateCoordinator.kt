@@ -16,7 +16,7 @@ internal class PlaybackSessionStateCoordinator(
     private val stateStore: PlaybackSessionStateStore,
     private val scope: CoroutineScope,
     private val canLoadLibraryItems: () -> Boolean,
-    private val loadLibraryItemsByIds: suspend (List<String>) -> List<MediaItem>,
+    private val loadLibraryItemsByQueueKeys: suspend (List<PlaybackQueueSnapshotItem>) -> List<MediaItem>,
 ) {
 
     private var persistJob: Job? = null
@@ -125,10 +125,13 @@ internal class PlaybackSessionStateCoordinator(
 
     private suspend fun restoreItems(snapshot: PlaybackSessionSnapshot): List<MediaItem> {
         val items = withContext(Dispatchers.IO) {
-            loadLibraryItemsByIds(snapshot.mediaIds)
+            loadLibraryItemsByQueueKeys(snapshot.queueItems)
         }
         val itemsById = items.associateBy { it.mediaId }
-        return snapshot.mediaIds.mapNotNull(itemsById::get)
+        val itemsByStableKey = items.associateBy { item -> item.stableKey.orEmpty() }
+        return snapshot.queueItems.mapNotNull { key ->
+            itemsById[key.mediaId] ?: itemsByStableKey[key.stableKey]
+        }
     }
 
     private fun PlaybackSessionSnapshot.restoredIndexIn(items: List<MediaItem>): Int {
@@ -185,8 +188,23 @@ private fun Player.toPlaybackSessionSnapshot(): PlaybackSessionSnapshot {
             }
         }
     }
+    val queueItems = buildList {
+        for (index in 0 until mediaItemCount) {
+            val item = getMediaItemAt(index)
+            val mediaId = item.mediaId.trim()
+            if (mediaId.isNotEmpty()) {
+                add(
+                    PlaybackQueueSnapshotItem(
+                        mediaId = mediaId,
+                        stableKey = item.stableKey.orEmpty(),
+                    ),
+                )
+            }
+        }
+    }
     return PlaybackSessionSnapshot(
         mediaIds = queue,
+        queueItems = queueItems,
         currentMediaId = currentMediaItem
             ?.mediaId
             ?.trim()

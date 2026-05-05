@@ -1,3 +1,5 @@
+@file:androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package com.smartisanos.music.playback
 
 import android.Manifest
@@ -13,6 +15,7 @@ import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import androidx.core.content.ContextCompat
 import com.google.common.collect.ImmutableList
@@ -106,7 +109,7 @@ class PlaybackService : MediaLibraryService() {
             stateStore = playbackSessionStateStore,
             scope = serviceScope,
             canLoadLibraryItems = { hasAudioPermission() },
-            loadLibraryItemsByIds = { mediaIds -> getAudioItemsByIds(mediaIds) },
+            loadLibraryItemsByQueueKeys = { queueKeys -> getAudioItemsByQueueKeys(queueKeys) },
         ).also { coordinator ->
             coordinator.start()
         }
@@ -214,6 +217,25 @@ class PlaybackService : MediaLibraryService() {
             .toList()
     }
 
+    private fun getAudioItemsByQueueKeys(queueKeys: List<PlaybackQueueSnapshotItem>): List<MediaItem> {
+        if (!hasAudioPermission() || queueKeys.isEmpty()) {
+            return emptyList()
+        }
+        val exclusions = if (exclusionsReady.isCompleted) {
+            exclusionsSnapshot
+        } else {
+            runBlocking { exclusionsReady.await() }
+        }
+        return localAudioLibrary.getAudioItemsByQueueKeys(queueKeys)
+            .asSequence()
+            .filter { item ->
+                val relativePath = item.mediaMetadata.extras
+                    ?.getString(LocalAudioLibrary.RelativePathExtraKey)
+                !exclusions.isMediaHidden(item.mediaId, relativePath)
+            }
+            .toList()
+    }
+
     private fun createSessionActivityPendingIntent(): PendingIntent {
         return PendingIntent.getActivity(
             this,
@@ -288,13 +310,13 @@ class PlaybackService : MediaLibraryService() {
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
             return libraryExecutor.submit<LibraryResult<ImmutableList<MediaItem>>> {
                 if (parentId != LocalAudioLibrary.ROOT_ID) {
-                    return@submit LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE, params)
+                    return@submit LibraryResult.ofError(SessionError.ERROR_BAD_VALUE, params)
                 }
 
                 val items = getAudioItems()
                 if (items.isEmpty() && !hasAudioPermission()) {
                     return@submit LibraryResult.ofError(
-                        LibraryResult.RESULT_ERROR_PERMISSION_DENIED,
+                        SessionError.ERROR_PERMISSION_DENIED,
                         params,
                     )
                 }
@@ -312,7 +334,7 @@ class PlaybackService : MediaLibraryService() {
         ): ListenableFuture<LibraryResult<MediaItem>> {
             return libraryExecutor.submit<LibraryResult<MediaItem>> {
                 if (!hasAudioPermission() && mediaId != LocalAudioLibrary.ROOT_ID) {
-                    return@submit LibraryResult.ofError(LibraryResult.RESULT_ERROR_PERMISSION_DENIED)
+                    return@submit LibraryResult.ofError(SessionError.ERROR_PERMISSION_DENIED)
                 }
 
                 val item = if (mediaId == LocalAudioLibrary.ROOT_ID) {
@@ -321,7 +343,7 @@ class PlaybackService : MediaLibraryService() {
                     getAudioItemsByIds(listOf(mediaId)).firstOrNull()
                 }
                 if (item == null) {
-                    LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE)
+                    LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
                 } else {
                     LibraryResult.ofItem(item, null)
                 }
@@ -365,7 +387,7 @@ class PlaybackService : MediaLibraryService() {
                 val durationMs = args.getLong(SleepTimerDurationMsKey, 0L)
                 if (durationMs <= 0L) {
                     return Futures.immediateFuture(
-                        SessionResult(SessionResult.RESULT_ERROR_BAD_VALUE),
+                        SessionResult(SessionError.ERROR_BAD_VALUE),
                     )
                 }
                 PlaybackSleepTimer.start(durationMs) {
@@ -380,7 +402,7 @@ class PlaybackService : MediaLibraryService() {
             if (customCommand.customAction == RefreshLibraryAction) {
                 return libraryRefreshExecutor.submit<SessionResult> {
                     if (!hasAudioPermission()) {
-                        return@submit SessionResult(SessionResult.RESULT_ERROR_PERMISSION_DENIED)
+                        return@submit SessionResult(SessionError.ERROR_PERMISSION_DENIED)
                     }
 
                     val result = localAudioLibrary.refreshAudioItems()
@@ -396,7 +418,7 @@ class PlaybackService : MediaLibraryService() {
                         if (result.successful) {
                             SessionResult.RESULT_SUCCESS
                         } else {
-                            SessionResult.RESULT_ERROR_UNKNOWN
+                            SessionError.ERROR_UNKNOWN
                         },
                     )
                 }
@@ -404,7 +426,7 @@ class PlaybackService : MediaLibraryService() {
             if (customCommand.customAction == InvalidateLibraryAction) {
                 return libraryRefreshExecutor.submit<SessionResult> {
                     if (!hasAudioPermission()) {
-                        return@submit SessionResult(SessionResult.RESULT_ERROR_PERMISSION_DENIED)
+                        return@submit SessionResult(SessionError.ERROR_PERMISSION_DENIED)
                     }
 
                     val items = getAudioItems(forceRefresh = true)
@@ -423,12 +445,12 @@ class PlaybackService : MediaLibraryService() {
                 val mediaId = args.getString(TrackRatingMediaIdKey)?.trim().orEmpty()
                 val score = args.getInt(TrackRatingScoreKey, -1)
                 if (mediaId.isBlank() || score !in TrackRatingMinScore..TrackRatingMaxScore) {
-                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_BAD_VALUE))
+                    return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
                 }
                 return libraryRefreshExecutor.submit<SessionResult> {
                     runBlocking {
                         playbackStatsRepository.setScore(mediaId, score)
-                    } ?: return@submit SessionResult(SessionResult.RESULT_ERROR_UNKNOWN)
+                    } ?: return@submit SessionResult(SessionError.ERROR_UNKNOWN)
                     serviceScope.launch(Dispatchers.Main.immediate) {
                         scheduleRatingLibraryRefresh()
                     }
