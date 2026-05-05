@@ -2,16 +2,21 @@ package com.smartisanos.music.playback
 
 import android.content.ContentUris
 import android.content.Context
+import android.database.Cursor
 import android.icu.text.Transliterator
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Bundle
+import android.os.Looper
 import android.os.storage.StorageManager
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import com.smartisanos.music.R
+import com.smartisanos.music.data.library.LibraryIndexDatabase
+import com.smartisanos.music.data.library.LibraryIndexEntity
+import com.smartisanos.music.data.library.LibraryIndexSnapshotEntity
 import com.smartisanos.music.data.playback.PlaybackStatsRecord
 import java.io.File
 import java.nio.CharBuffer
@@ -25,15 +30,17 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
-class LocalAudioLibrary(
+internal class LocalAudioLibrary(
     private val context: Context,
     private val playbackStatsProvider: () -> Map<String, PlaybackStatsRecord> = { emptyMap() },
     private val playbackStatsByIdsProvider: (Set<String>) -> Map<String, PlaybackStatsRecord> = { mediaIds ->
         playbackStatsProvider().filterKeys(mediaIds::contains)
     },
+    private val libraryIndexDatabase: LibraryIndexDatabase = LibraryIndexDatabase.getInstance(context),
 ) {
 
     private val audioCacheLock = Any()
+    private val libraryIndexDao = libraryIndexDatabase.libraryIndexDao()
     @Volatile private var audioCache = AudioCache()
 
     fun getRootItem(): MediaItem {
@@ -49,25 +56,30 @@ class LocalAudioLibrary(
             .build()
     }
 
-    fun getAudioItems(forceRefresh: Boolean = false): List<MediaItem> = synchronized(audioCacheLock) {
+    fun getAudioItems(forceRefresh: Boolean = false): List<MediaItem> {
         val currentSnapshot = currentMediaStoreSnapshot()
-        val cache = audioCache
-        // generation 负责日常增量变化，version 负责更大范围的媒体库重建。
-        if (!forceRefresh && cache.snapshot == currentSnapshot && cache.items.isNotEmpty()) {
-            return@synchronized cache.items
+        synchronized(audioCacheLock) {
+            val cache = audioCache
+            // generation 负责日常增量变化，version 负责更大范围的媒体库重建。
+            if (!forceRefresh && cache.snapshot == currentSnapshot && cache.items.isNotEmpty()) {
+                return cache.items
+            }
         }
 
-        val items = queryAudioItems(
-            selection = audioSelection(),
-            selectionArgs = null,
-            sortOrder = audioSortOrder(),
-        )
+        if (!forceRefresh) {
+            val indexedItems = getAudioItemsFromIndexIfFresh(currentSnapshot)
+            if (indexedItems.isNotEmpty()) {
+                synchronized(audioCacheLock) {
+                    audioCache = AudioCache(
+                        snapshot = currentSnapshot,
+                        items = indexedItems,
+                    )
+                }
+                return indexedItems
+            }
+        }
 
-        audioCache = AudioCache(
-            snapshot = currentSnapshot,
-            items = items,
-        )
-        items
+        return reconcileAudioIndexAndCache(currentSnapshot)
     }
 
     fun getAudioItemsByIds(mediaIds: List<String>): List<MediaItem> {
@@ -86,28 +98,59 @@ class LocalAudioLibrary(
         if (missingIds.isEmpty()) {
             return requestedIdStrings.mapNotNull(cachedItemsById::get)
         }
+        if (!canReadLibraryIndexOnCurrentThread()) {
+            return requestedIdStrings.mapNotNull(cachedItemsById::get)
+        }
 
         val missingIdStrings = missingIds.map(Long::toString)
-        val playbackStats = playbackStatsForIds(missingIdStrings.toSet())
-        val queriedItemsById = missingIds
-            .chunked(MediaStoreIdSelectionChunkSize)
-            .flatMap { ids ->
-                queryAudioItems(
-                    selection = buildString {
-                        append(audioSelection())
-                        append(" AND ${MediaStore.Audio.Media._ID} IN (")
-                        append(ids.joinToString(separator = ",") { "?" })
-                        append(")")
-                    },
-                    selectionArgs = ids.map(Long::toString).toTypedArray(),
-                    sortOrder = null,
-                    playbackStats = playbackStats,
-                )
-            }
+        val indexFresh = isAudioIndexFresh(currentMediaStoreSnapshot())
+        val indexedItemsById = if (indexFresh) {
+            libraryIndexDao.getValidIndexesByMediaIds(missingIdStrings)
+                .toMediaItems(playbackStatsForIds(missingIdStrings.toSet()))
+                .associateBy(MediaItem::mediaId)
+        } else {
+            emptyMap()
+        }
+        val stillMissingIds = missingIds.filter { id -> id.toString() !in indexedItemsById }
+        val playbackStats = playbackStatsForIds(stillMissingIds.map(Long::toString).toSet())
+        val queriedItemsById = queryAudioIndexesByIds(stillMissingIds)
+            .toMediaItems(playbackStats)
             .associateBy(MediaItem::mediaId)
-        val itemsById = cachedItemsById + queriedItemsById
+        val itemsById = cachedItemsById + indexedItemsById + queriedItemsById
 
         return requestedIdStrings.mapNotNull(itemsById::get)
+    }
+
+    fun getAudioItemsByQueueKeys(queueKeys: List<PlaybackQueueSnapshotItem>): List<MediaItem> {
+        if (queueKeys.isEmpty()) {
+            return emptyList()
+        }
+        val byIds = getAudioItemsByIds(queueKeys.map(PlaybackQueueSnapshotItem::mediaId))
+            .associateBy(MediaItem::mediaId)
+            .toMutableMap()
+        val missingStableKeys = queueKeys
+            .asSequence()
+            .filter { key -> key.mediaId !in byIds }
+            .map(PlaybackQueueSnapshotItem::stableKey)
+            .filter(String::isNotBlank)
+            .distinct()
+            .toList()
+        if (missingStableKeys.isNotEmpty() && canReadLibraryIndexOnCurrentThread()) {
+            val currentSnapshot = currentMediaStoreSnapshot()
+            if (!isAudioIndexFresh(currentSnapshot)) {
+                reconcileAudioIndexAndCache(currentSnapshot)
+            }
+            val stableItems = libraryIndexDao.getValidIndexesByStableKeys(missingStableKeys)
+                .toMediaItems()
+            stableItems.forEach { item ->
+                byIds[item.mediaId] = item
+            }
+            val stableItemsByKey = stableItems.associateBy { item -> item.stableKey.orEmpty() }
+            return queueKeys.mapNotNull { key ->
+                byIds[key.mediaId] ?: stableItemsByKey[key.stableKey]
+            }
+        }
+        return queueKeys.mapNotNull { key -> byIds[key.mediaId] }
     }
 
     fun invalidateAudioItems() {
@@ -138,15 +181,112 @@ class LocalAudioLibrary(
         return getAudioItemsByIds(listOf(mediaId)).firstOrNull()
     }
 
-    private fun queryAudioItems(
+    private fun getAudioItemsFromIndexIfFresh(currentSnapshot: MediaStoreSnapshot): List<MediaItem> {
+        if (!isAudioIndexFresh(currentSnapshot)) {
+            return emptyList()
+        }
+        return libraryIndexDao.getValidIndexes().toMediaItems()
+    }
+
+    private fun isAudioIndexFresh(currentSnapshot: MediaStoreSnapshot): Boolean {
+        val snapshotKey = libraryIndexDao.getSnapshotKey() ?: return false
+        return snapshotKey == currentSnapshot.storageKey && libraryIndexDao.getValidIndexCount() > 0
+    }
+
+    private fun canReadLibraryIndexOnCurrentThread(): Boolean {
+        return Looper.myLooper() != Looper.getMainLooper()
+    }
+
+    private fun reconcileAudioIndexAndCache(currentSnapshot: MediaStoreSnapshot): List<MediaItem> {
+        val items = reconcileAudioIndex(currentSnapshot)
+        synchronized(audioCacheLock) {
+            audioCache = AudioCache(
+                snapshot = currentSnapshot,
+                items = items,
+            )
+        }
+        return items
+    }
+
+    private fun reconcileAudioIndex(currentSnapshot: MediaStoreSnapshot): List<MediaItem> {
+        val indexedAt = System.currentTimeMillis()
+        val existingIndexes = libraryIndexDao.getAllIndexes()
+        val existingByStableKey = existingIndexes.associateBy(LibraryIndexEntity::stableKey)
+        val existingByMediaId = existingIndexes.associateBy(LibraryIndexEntity::mediaId)
+        val currentRows = queryAudioCursorRows(
+            selection = audioSelection(),
+            selectionArgs = null,
+            sortOrder = audioSortOrder(),
+        )
+        val currentStableKeys = currentRows.mapTo(linkedSetOf(), AudioCursorRow::stableKey)
+        val nextIndexes = currentRows.map { row ->
+            val previous = existingByStableKey[row.stableKey] ?: existingByMediaId[row.mediaId]
+            if (previous != null && previous.matches(row)) {
+                previous.copy(
+                    mediaId = row.mediaId,
+                    uri = row.uri,
+                    valid = true,
+                )
+            } else {
+                row.toLibraryIndexEntity(indexedAt)
+            }
+        }
+        val invalidStableKeys = existingIndexes
+            .asSequence()
+            .filter(LibraryIndexEntity::valid)
+            .map(LibraryIndexEntity::stableKey)
+            .filter { stableKey -> stableKey !in currentStableKeys }
+            .toList()
+
+        libraryIndexDatabase.runInTransaction {
+            if (existingIndexes.isEmpty()) {
+                libraryIndexDao.deleteAllIndexes()
+            }
+            if (nextIndexes.isNotEmpty()) {
+                libraryIndexDao.upsertIndexes(nextIndexes)
+            }
+            invalidStableKeys.chunked(SqlBindParameterChunkSize).forEach { chunk ->
+                libraryIndexDao.markInvalid(chunk, indexedAt)
+            }
+            libraryIndexDao.upsertSnapshot(
+                LibraryIndexSnapshotEntity(
+                    snapshotKey = currentSnapshot.storageKey,
+                    updatedAt = indexedAt,
+                ),
+            )
+        }
+
+        return libraryIndexDao.getValidIndexes().toMediaItems()
+    }
+
+    private fun queryAudioIndexesByIds(mediaIds: List<Long>): List<LibraryIndexEntity> {
+        if (mediaIds.isEmpty()) {
+            return emptyList()
+        }
+        val indexedAt = System.currentTimeMillis()
+        return mediaIds
+            .chunked(MediaStoreIdSelectionChunkSize)
+            .flatMap { ids ->
+                queryAudioCursorRows(
+                    selection = buildString {
+                        append(audioSelection())
+                        append(" AND ${MediaStore.Audio.Media._ID} IN (")
+                        append(ids.joinToString(separator = ",") { "?" })
+                        append(")")
+                    },
+                    selectionArgs = ids.map(Long::toString).toTypedArray(),
+                    sortOrder = null,
+                )
+            }
+            .map { row -> row.toLibraryIndexEntity(indexedAt) }
+    }
+
+    private fun queryAudioCursorRows(
         selection: String,
         selectionArgs: Array<String>?,
         sortOrder: String?,
-        playbackStats: Map<String, PlaybackStatsRecord>? = null,
-    ): List<MediaItem> {
-        val items = mutableListOf<MediaItem>()
-        val resolvedPlaybackStats = playbackStats
-            ?: runCatching(playbackStatsProvider).getOrDefault(emptyMap())
+    ): List<AudioCursorRow> {
+        val rows = mutableListOf<AudioCursorRow>()
         try {
             context.contentResolver.query(
                 audioCollection(),
@@ -155,120 +295,171 @@ class LocalAudioLibrary(
                 selectionArgs,
                 sortOrder,
             )?.use { cursor ->
-                val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
-                val titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
-                val artistColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-                val albumColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
-                val albumArtistColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ARTIST)
-                val albumIdColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
-                val durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
-                val trackColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TRACK)
-                val yearColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.YEAR)
-                val dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
-                val generationAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.GENERATION_ADDED)
-                val relativePathColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
-                val displayNameColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
-                val mimeTypeColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
-
                 while (cursor.moveToNext()) {
-                    val id = cursor.getLong(idColumn)
-                    val title = cursor.getString(titleColumn)
-                        ?.fixLegacyMetadataEncoding()
-                        ?.takeIf { it.isNotBlank() }
-                        ?: context.getString(R.string.unknown_song_title)
-                    val artist = cursor.getString(artistColumn)
-                        ?.fixLegacyMetadataEncoding()
-                        ?.takeIf { it.isNotBlank() && it != MediaStore.UNKNOWN_STRING }
-                        ?: context.getString(R.string.unknown_artist)
-                    val album = cursor.getString(albumColumn)
-                        ?.fixLegacyMetadataEncoding()
-                        ?.takeIf { it.isNotBlank() }
-                    val albumArtist = cursor.getString(albumArtistColumn)
-                        ?.fixLegacyMetadataEncoding()
-                        ?.takeIf { it.isNotBlank() && it != MediaStore.UNKNOWN_STRING }
-                    val albumId = cursor.getLong(albumIdColumn).takeIf { it > 0L }
-                    val durationMs = cursor.getLong(durationColumn)
-                    val trackNumber = cursor.getInt(trackColumn).takeIf { it > 0 }
-                    val year = cursor.getInt(yearColumn).takeIf { it > 0 }
-                    val dateAddedSeconds = cursor.getLong(dateAddedColumn).takeIf { it > 0L }
-                    val generationAdded = cursor.getLong(generationAddedColumn).takeIf { it > 0L }
-                    val relativePath = cursor.getString(relativePathColumn)?.takeIf { it.isNotBlank() }
-                    val displayName = cursor.getString(displayNameColumn)?.takeIf { it.isNotBlank() }
-                    val mimeType = cursor.getString(mimeTypeColumn)?.takeIf { it.isNotBlank() }
-                    val audioQualityBadge = resolveAudioQualityBadge(displayName, mimeType)
-                    val titleSortKey = LegacyLibraryTitleNormalizer.normalize(title)
-                    val titleSection = titleSortKey.legacyLibraryTitleSection()
-                    val mediaUri = ContentUris.withAppendedId(audioCollection(), id)
-                    val stats = resolvedPlaybackStats[id.toString()]
-                    val playCount = stats?.playCount?.takeIf { it > 0L }
-                    val score = stats?.score?.takeIf { it > 0 }
-
-                    val extras = Bundle().apply {
-                        putString(TitleSortKeyExtraKey, titleSortKey)
-                        putString(TitleSectionExtraKey, titleSection)
-                        if (!relativePath.isNullOrBlank()) {
-                            putString(RelativePathExtraKey, relativePath)
-                        }
-                        if (albumId != null) {
-                            putLong(AlbumIdExtraKey, albumId)
-                        }
-                        if (dateAddedSeconds != null) {
-                            putLong(DateAddedExtraKey, dateAddedSeconds)
-                        }
-                        if (generationAdded != null) {
-                            putLong(GenerationAddedExtraKey, generationAdded)
-                        }
-                        if (!audioQualityBadge.isNullOrBlank()) {
-                            putString(AudioQualityBadgeExtraKey, audioQualityBadge)
-                        }
-                        if (playCount != null) {
-                            putLong(PlayCountExtraKey, playCount)
-                        }
-                        if (score != null) {
-                            putLong(RatingExtraKey, score.toLong())
-                        }
-                    }
-
-                    val metadataBuilder = MediaMetadata.Builder()
-                        .setTitle(title)
-                        .setDisplayTitle(title)
-                        .setArtist(artist)
-                        .setSubtitle(artist)
-                        .setDurationMs(durationMs)
-                        .setIsPlayable(true)
-                        .setIsBrowsable(false)
-
-                    if (!album.isNullOrBlank()) {
-                        metadataBuilder.setAlbumTitle(album)
-                    }
-
-                    if (!albumArtist.isNullOrBlank()) {
-                        metadataBuilder.setAlbumArtist(albumArtist)
-                    }
-
-                    metadataBuilder.setExtras(extras)
-                    metadataBuilder.setArtworkUri(trackArtworkUri(id))
-
-                    if (trackNumber != null) {
-                        metadataBuilder.setTrackNumber(trackNumber)
-                    }
-
-                    if (year != null) {
-                        metadataBuilder.setReleaseYear(year)
-                    }
-
-                    items += MediaItem.Builder()
-                        .setMediaId(id.toString())
-                        .setUri(mediaUri)
-                        .setMediaMetadata(metadataBuilder.build())
-                        .build()
+                    cursor.toAudioCursorRow()?.let(rows::add)
                 }
             }
         } catch (_: SecurityException) {
             return emptyList()
         }
 
-        return items
+        return rows
+    }
+
+    private fun Cursor.toAudioCursorRow(): AudioCursorRow? {
+        val id = getLong(getColumnIndexOrThrow(MediaStore.Audio.Media._ID))
+        val volumeName = getString(getColumnIndexOrThrow(MediaStore.MediaColumns.VOLUME_NAME))
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?: StableKeyVolumeFallback
+        val relativePath = normalizeLibraryRelativePath(
+            getString(getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)),
+        )
+        val displayName = getString(getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME))
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?: return null
+        val stableKey = stableAudioLibraryKey(volumeName, relativePath, displayName) ?: return null
+        val durationMs = getLong(getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION))
+        val mimeType = getString(getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE))
+            ?.takeIf { it.isNotBlank() }
+
+        return AudioCursorRow(
+            mediaId = id.toString(),
+            stableKey = stableKey,
+            uri = ContentUris.withAppendedId(audioCollection(), id).toString(),
+            title = getString(getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)),
+            artist = getString(getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)),
+            album = getString(getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)),
+            albumArtist = getString(getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ARTIST)),
+            albumId = getLong(getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)).takeIf { it > 0L },
+            durationMs = durationMs,
+            track = getInt(getColumnIndexOrThrow(MediaStore.Audio.Media.TRACK)).takeIf { it > 0 },
+            year = getInt(getColumnIndexOrThrow(MediaStore.Audio.Media.YEAR)).takeIf { it > 0 },
+            volumeName = volumeName,
+            relativePath = relativePath,
+            displayName = displayName,
+            mimeType = mimeType,
+            dateAdded = getLong(getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)).takeIf { it > 0L },
+            dateModified = getLong(getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)).takeIf { it > 0L },
+            generationAdded = getLong(getColumnIndexOrThrow(MediaStore.Audio.Media.GENERATION_ADDED)).takeIf { it > 0L },
+            generationModified = getLong(getColumnIndexOrThrow(MediaStore.Audio.Media.GENERATION_MODIFIED)).takeIf { it > 0L },
+        )
+    }
+
+    private fun AudioCursorRow.toLibraryIndexEntity(indexedAt: Long): LibraryIndexEntity {
+        val normalizedTitle = title
+            ?.fixLegacyMetadataEncoding()
+            ?.takeIf { it.isNotBlank() }
+            ?: context.getString(R.string.unknown_song_title)
+        val normalizedArtist = artist
+            ?.fixLegacyMetadataEncoding()
+            ?.takeIf { it.isNotBlank() && it != MediaStore.UNKNOWN_STRING }
+            ?: context.getString(R.string.unknown_artist)
+        val normalizedAlbum = album
+            ?.fixLegacyMetadataEncoding()
+            ?.takeIf { it.isNotBlank() }
+        val normalizedAlbumArtist = albumArtist
+            ?.fixLegacyMetadataEncoding()
+            ?.takeIf { it.isNotBlank() && it != MediaStore.UNKNOWN_STRING }
+        val titleSortKey = LegacyLibraryTitleNormalizer.normalize(normalizedTitle)
+        return LibraryIndexEntity(
+            mediaId = mediaId,
+            stableKey = stableKey,
+            uri = uri,
+            title = normalizedTitle,
+            artist = normalizedArtist,
+            album = normalizedAlbum,
+            albumArtist = normalizedAlbumArtist,
+            albumId = albumId,
+            durationMs = durationMs,
+            track = track,
+            year = year,
+            volumeName = volumeName,
+            relativePath = relativePath,
+            displayName = displayName,
+            mimeType = mimeType,
+            dateAdded = dateAdded,
+            dateModified = dateModified,
+            generationAdded = generationAdded,
+            generationModified = generationModified,
+            titleSortKey = titleSortKey,
+            titleSection = titleSortKey.legacyLibraryTitleSection(),
+            qualityBadge = resolveAudioQualityBadge(displayName, mimeType),
+            indexedAt = indexedAt,
+            valid = true,
+        )
+    }
+
+    private fun LibraryIndexEntity.matches(row: AudioCursorRow): Boolean {
+        return stableKey == row.stableKey &&
+            dateModified == row.dateModified &&
+            generationModified == row.generationModified &&
+            durationMs == row.durationMs &&
+            relativePath == row.relativePath &&
+            displayName == row.displayName &&
+            mimeType == row.mimeType
+    }
+
+    private fun List<LibraryIndexEntity>.toMediaItems(
+        playbackStats: Map<String, PlaybackStatsRecord>? = null,
+    ): List<MediaItem> {
+        val resolvedPlaybackStats = playbackStats
+            ?: runCatching(playbackStatsProvider).getOrDefault(emptyMap())
+        return map { index -> index.toMediaItem(resolvedPlaybackStats[index.mediaId]) }
+    }
+
+    private fun LibraryIndexEntity.toMediaItem(stats: PlaybackStatsRecord?): MediaItem {
+        val playCount = stats?.playCount?.takeIf { it > 0L }
+        val score = stats?.score?.takeIf { it > 0 }
+        val extras = Bundle().apply {
+            putString(StableKeyExtraKey, stableKey)
+            putString(TitleSortKeyExtraKey, titleSortKey)
+            putString(TitleSectionExtraKey, titleSection)
+            if (relativePath.isNotBlank()) {
+                putString(RelativePathExtraKey, relativePath)
+            }
+            albumId?.let { putLong(AlbumIdExtraKey, it) }
+            dateAdded?.let { putLong(DateAddedExtraKey, it) }
+            generationAdded?.let { putLong(GenerationAddedExtraKey, it) }
+            if (!qualityBadge.isNullOrBlank()) {
+                putString(AudioQualityBadgeExtraKey, qualityBadge)
+            }
+            if (playCount != null) {
+                putLong(PlayCountExtraKey, playCount)
+            }
+            if (score != null) {
+                putLong(RatingExtraKey, score.toLong())
+            }
+        }
+
+        val metadataBuilder = MediaMetadata.Builder()
+            .setTitle(title)
+            .setDisplayTitle(title)
+            .setArtist(artist)
+            .setSubtitle(artist)
+            .setDurationMs(durationMs)
+            .setIsPlayable(true)
+            .setIsBrowsable(false)
+            .setExtras(extras)
+
+        if (!album.isNullOrBlank()) {
+            metadataBuilder.setAlbumTitle(album)
+        }
+        if (!albumArtist.isNullOrBlank()) {
+            metadataBuilder.setAlbumArtist(albumArtist)
+        }
+        track?.let(metadataBuilder::setTrackNumber)
+        year?.let(metadataBuilder::setReleaseYear)
+        mediaId.toLongOrNull()?.let { id ->
+            metadataBuilder.setArtworkUri(trackArtworkUri(id))
+        }
+
+        return MediaItem.Builder()
+            .setMediaId(mediaId)
+            .setUri(Uri.parse(uri))
+            .setMediaMetadata(metadataBuilder.build())
+            .build()
     }
 
     private fun getValidCachedItemsById(mediaIds: Set<String>): Map<String, MediaItem> {
@@ -298,6 +489,7 @@ class LocalAudioLibrary(
 
     companion object {
         const val ROOT_ID = "root"
+        const val StableKeyExtraKey = "com.smartisanos.music.extra.STABLE_KEY"
         const val AlbumIdExtraKey = "com.smartisanos.music.extra.ALBUM_ID"
         const val RelativePathExtraKey = "com.smartisanos.music.extra.RELATIVE_PATH"
         const val DateAddedExtraKey = "com.smartisanos.music.extra.DATE_ADDED"
@@ -315,6 +507,7 @@ class LocalAudioLibrary(
         const val AudioQualityBadgeCue = "cue"
         private const val MediaScannerWaitTimeoutSeconds = 30L
         private const val MediaStoreIdSelectionChunkSize = 500
+        private const val SqlBindParameterChunkSize = 900
         private val AudioFileExtensions = setOf(
             "aac",
             "aif",
@@ -322,8 +515,6 @@ class LocalAudioLibrary(
             "alac",
             "amr",
             "ape",
-            "dff",
-            "dsf",
             "flac",
             "m4a",
             "m4b",
@@ -381,6 +572,7 @@ class LocalAudioLibrary(
                 else -> null
             }
         }
+
     }
 
     data class RefreshResult(
@@ -420,7 +612,11 @@ class LocalAudioLibrary(
 
     private data class MediaStoreSnapshot(
         val volumes: Map<String, VolumeSnapshot>,
-    )
+    ) {
+        val storageKey: String = volumes.entries.joinToString("\u001e") { (volume, snapshot) ->
+            listOf(volume, snapshot.version, snapshot.generation.toString()).joinToString("\u001f")
+        }
+    }
 
     private data class VolumeSnapshot(
         val version: String,
@@ -442,6 +638,28 @@ class LocalAudioLibrary(
         val timedOut: Boolean,
     )
 
+    private data class AudioCursorRow(
+        val mediaId: String,
+        val stableKey: String,
+        val uri: String,
+        val title: String?,
+        val artist: String?,
+        val album: String?,
+        val albumArtist: String?,
+        val albumId: Long?,
+        val durationMs: Long,
+        val track: Int?,
+        val year: Int?,
+        val volumeName: String,
+        val relativePath: String,
+        val displayName: String,
+        val mimeType: String?,
+        val dateAdded: Long?,
+        val dateModified: Long?,
+        val generationAdded: Long?,
+        val generationModified: Long?,
+    )
+
     private fun audioCollection(): Uri {
         return MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
     }
@@ -458,7 +676,10 @@ class LocalAudioLibrary(
             MediaStore.Audio.Media.TRACK,
             MediaStore.Audio.Media.YEAR,
             MediaStore.Audio.Media.DATE_ADDED,
+            MediaStore.Audio.Media.DATE_MODIFIED,
             MediaStore.Audio.Media.GENERATION_ADDED,
+            MediaStore.Audio.Media.GENERATION_MODIFIED,
+            MediaStore.MediaColumns.VOLUME_NAME,
             MediaStore.MediaColumns.RELATIVE_PATH,
             MediaStore.MediaColumns.DISPLAY_NAME,
             MediaStore.MediaColumns.MIME_TYPE,
@@ -500,7 +721,7 @@ class LocalAudioLibrary(
                 val volumeName = cursor.getString(volumeNameColumn)
                 val relativePath = cursor.getString(relativePathColumn)
                 val displayName = cursor.getString(displayNameColumn)
-                indexedAudioKey(volumeName, relativePath, displayName)?.let(fileKeys::add)
+                stableAudioLibraryKey(volumeName, relativePath, displayName)?.let(fileKeys::add)
             }
         }
 
@@ -531,7 +752,7 @@ class LocalAudioLibrary(
                         return@forEach
                     }
                     val relativePath = candidate.relativePathFromVolumeRoot(volumeRoot.root)
-                    val key = indexedAudioKey(
+                    val key = stableAudioLibraryKey(
                         volumeName = volumeRoot.mediaStoreVolumeName,
                         relativePath = relativePath,
                         displayName = candidate.name,
@@ -664,26 +885,6 @@ class LocalAudioLibrary(
         }.getOrDefault(false)
     }
 
-    private fun indexedAudioKey(
-        volumeName: String?,
-        relativePath: String?,
-        displayName: String?,
-    ): String? {
-        val normalizedDisplayName = displayName?.trim().orEmpty()
-        if (normalizedDisplayName.isEmpty()) {
-            return null
-        }
-        val normalizedVolumeName = volumeName?.trim().orEmpty()
-        val normalizedRelativePath = relativePath
-            ?.replace('\\', '/')
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() }
-            ?.let { if (it.endsWith('/')) it else "$it/" }
-            .orEmpty()
-        return "$normalizedVolumeName:$normalizedRelativePath$normalizedDisplayName"
-            .lowercase(Locale.ROOT)
-    }
-
     private fun File.hasAudioCandidateExtension(): Boolean {
         val extension = extension.lowercase(Locale.ROOT)
         return extension in AudioFileExtensions
@@ -786,6 +987,32 @@ private fun String.legacyLibraryTitleSection(): String {
     }
 }
 
+internal fun stableAudioLibraryKey(
+    volumeName: String?,
+    relativePath: String?,
+    displayName: String?,
+): String? {
+    val normalizedDisplayName = displayName?.trim().orEmpty()
+    if (normalizedDisplayName.isEmpty()) {
+        return null
+    }
+    val normalizedVolumeName = volumeName
+        ?.trim()
+        ?.takeIf(String::isNotEmpty)
+        ?: StableKeyVolumeFallback
+    return "$normalizedVolumeName:${normalizeLibraryRelativePath(relativePath)}$normalizedDisplayName"
+        .lowercase(Locale.ROOT)
+}
+
+private fun normalizeLibraryRelativePath(relativePath: String?): String {
+    return relativePath
+        ?.replace('\\', '/')
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?.let { if (it.endsWith('/')) it else "$it/" }
+        .orEmpty()
+}
+
 internal fun shouldSkipMediaScannerPath(relativePath: String): Boolean {
     return relativePath
         .replace('\\', '/')
@@ -793,3 +1020,5 @@ internal fun shouldSkipMediaScannerPath(relativePath: String): Boolean {
         .filter(String::isNotEmpty)
         .any { segment -> segment.startsWith('.') }
 }
+
+private const val StableKeyVolumeFallback = "unknown-volume"

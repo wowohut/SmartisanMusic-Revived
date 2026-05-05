@@ -38,4 +38,33 @@ class LocalAudioLibraryTest {
         assertEquals("naïve", "naïve".fixLegacyMetadataEncoding())
         assertEquals("周杰伦", "周杰伦".fixLegacyMetadataEncoding())
     }
+
+    @Test
+    fun `stableAudioLibraryKey normalizes path and display name`() {
+        assertEquals(
+            "external_primary:music/album/song.mp3",
+            stableAudioLibraryKey(
+                volumeName = "external_primary",
+                relativePath = "Music\\Album",
+                displayName = " Song.MP3 ",
+            ),
+        )
+    }
+
+    @Test
+    fun `stableAudioLibraryKey uses readable volume fallback`() {
+        assertEquals(
+            "unknown-volume:song.mp3",
+            stableAudioLibraryKey(
+                volumeName = null,
+                relativePath = null,
+                displayName = "song.mp3",
+            ),
+        )
+    }
+
+    @Test
+    fun `stableAudioLibraryKey rejects blank display name`() {
+        assertEquals(null, stableAudioLibraryKey("external", "Music", " "))
+    }
 }
