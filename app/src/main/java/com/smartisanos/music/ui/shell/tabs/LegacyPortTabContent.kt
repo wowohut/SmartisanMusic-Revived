@@ -9,6 +9,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.media3.common.MediaItem
 import com.smartisanos.music.data.favorite.FavoriteSongRecord
 import com.smartisanos.music.data.settings.ArtistSettings
@@ -45,6 +47,7 @@ internal fun LegacyPortTabContent(
     artistNestedPredictiveBackProgress: Float?,
     artistNestedPredictiveBackExitConsumed: Boolean,
     onArtistNestedPredictiveBackExitConsumedReset: () -> Unit,
+    playbackBarOverlayHeight: Dp = 0.dp,
     hiddenMediaIds: Set<String>,
     libraryRefreshVersion: Int,
     libraryRefreshing: Boolean,
@@ -93,6 +96,7 @@ internal fun LegacyPortTabContent(
                 onSongSelectionChange = onSongSelectionChange,
                 onTrackMoreClick = onLibraryTrackMoreClick,
                 onRequestSongDeleteConfirmation = onRequestSongDeleteConfirmation,
+                playbackBarOverlayHeight = playbackBarOverlayHeight,
                 modifier = Modifier.fillMaxSize(),
             )
         }

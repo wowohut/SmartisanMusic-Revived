@@ -16,6 +16,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -42,9 +45,11 @@ internal fun LegacyPortSongsPage(
     onSongSelectionChange: (String, Boolean) -> Unit,
     onTrackMoreClick: (MediaItem) -> Unit,
     onRequestSongDeleteConfirmation: (Set<String>, (() -> Unit)?) -> Unit,
+    playbackBarOverlayHeight: Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
     val browser = LocalPlaybackBrowser.current
+    val playbackBarOverlayHeightPx = with(LocalDensity.current) { playbackBarOverlayHeight.roundToPx() }
     var selectedSortIndex by remember { mutableStateOf(0) }
     val visibleSongs = remember(mediaItems, hiddenMediaIds) {
         mediaItems.filterNot { mediaItem -> mediaItem.mediaId in hiddenMediaIds }
@@ -91,6 +96,14 @@ internal fun LegacyPortSongsPage(
                 alpha = if (editMode) 0.22f else 1f
             }
             root.findViewById<View>(R.id.view_divider)?.visibility = if (hasSongs) View.VISIBLE else View.GONE
+            root.findViewById<FrameLayout>(R.id.all_track_fragment_container)?.apply {
+                (layoutParams as? RelativeLayout.LayoutParams)?.let { params ->
+                    if (params.bottomMargin != playbackBarOverlayHeightPx) {
+                        params.bottomMargin = playbackBarOverlayHeightPx
+                        layoutParams = params
+                    }
+                }
+            }
             root.findViewById<View>(R.id.bt_play)?.apply {
                 isEnabled = playActionsEnabled
                 setOnClickListener {
@@ -110,6 +123,12 @@ internal fun LegacyPortSongsPage(
                 }
             }
             val listView = root.findViewById<ListView>(R.id.list) ?: return@AndroidView
+            listView.apply {
+                if (paddingBottom != 0 || !clipToPadding) {
+                    setPadding(paddingLeft, paddingTop, paddingRight, 0)
+                    clipToPadding = true
+                }
+            }
             val sortDisplayMode = selectedSortIndex.toLegacySongsSortDisplayMode()
             val showQuickBar = hasSongs &&
                 sortDisplayMode == LegacySongsSortDisplayMode.Name &&

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
@@ -501,7 +502,14 @@ private fun LegacyPortMainShellContent(
         onExternalAudioLaunchConsumed(request.requestId)
     }
 
-    val realTabContentBottomMargin = dimensionResource(R.dimen.realtabcontent_margin_bottom) - 6.dp
+    val bottomNavigationHeight = dimensionResource(R.dimen.realtabcontent_margin_bottom) +
+        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val realTabContentBottomMargin = if (playbackBarComposed) {
+        bottomNavigationHeight - 6.dp
+    } else {
+        bottomNavigationHeight
+    }
+    val playbackBarOverlayHeight = if (playbackBarComposed) playbackBarHeight else 0.dp
     val hideBottomChrome = currentDestination == MusicDestination.More && moreSettingsPageActive
 
     LaunchedEffect(currentDestination) {
@@ -651,6 +659,7 @@ private fun LegacyPortMainShellContent(
                 artistNestedPredictiveBackProgress = artistNestedPredictiveBackState.progress,
                 artistNestedPredictiveBackExitConsumed = artistNestedPredictiveBackState.exitConsumed,
                 onArtistNestedPredictiveBackExitConsumedReset = artistNestedPredictiveBackState::reset,
+                playbackBarOverlayHeight = if (hideBottomChrome) 0.dp else playbackBarOverlayHeight,
                 hiddenMediaIds = libraryExclusions.hiddenMediaIds,
                 libraryRefreshVersion = libraryRefreshVersion,
                 libraryRefreshing = libraryRefreshing,
