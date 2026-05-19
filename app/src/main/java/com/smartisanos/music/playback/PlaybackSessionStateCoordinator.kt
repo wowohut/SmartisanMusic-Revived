@@ -110,8 +110,7 @@ internal class PlaybackSessionStateCoordinator(
                         } else {
                             0L
                         }
-                        player.setMediaItems(restoredItems, restoredIndex, restoredPositionMs)
-                        player.prepare()
+                        player.restoreQueuePaused(restoredItems, restoredIndex, restoredPositionMs)
                     }
                 }
             } finally {
@@ -223,4 +222,14 @@ private fun Int.sanitizedRepeatMode(): Int {
         Player.REPEAT_MODE_ALL -> this
         else -> Player.REPEAT_MODE_OFF
     }
+}
+
+private fun Player.restoreQueuePaused(
+    mediaItems: List<MediaItem>,
+    startIndex: Int,
+    startPositionMs: Long,
+) {
+    pause()
+    setMediaItems(mediaItems, startIndex, startPositionMs)
+    prepare()
 }
