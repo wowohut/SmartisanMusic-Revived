@@ -709,8 +709,9 @@ private fun buildMoreActions(
             onClick = callbacks.onFavoriteToggle,
         ),
         MoreActionItem(
-            labelRes = if (visualPage == PlaybackVisualPage.Cover) R.string.lyrics else R.string.player_axis_enabled,
+            labelRes = R.string.lyrics,
             iconRes = R.drawable.more_select_icon_lyric,
+            selected = visualPage == PlaybackVisualPage.Lyrics,
             onClick = callbacks.onLyricsToggle,
         ),
         MoreActionItem(

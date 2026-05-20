@@ -44,7 +44,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.keepScreenOn
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.res.painterResource
@@ -221,7 +220,6 @@ internal fun PlaybackVisualStage(
                         lyrics = embeddedLyrics,
                         fallbackLyricsLines = fallbackLyricsLines,
                         currentPositionMs = lyricsPositionMs,
-                        keepLyricsScreenAwake = keepLyricsScreenAwake,
                         onVisualPageToggle = onVisualPageToggle,
                         modifier = Modifier.matchParentSize(),
                     )
@@ -723,7 +721,6 @@ private fun PlaybackLyricsPage(
     lyrics: EmbeddedLyrics?,
     fallbackLyricsLines: List<String>,
     currentPositionMs: Long,
-    keepLyricsScreenAwake: Boolean,
     onVisualPageToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -734,13 +731,6 @@ private fun PlaybackLyricsPage(
         fallbackLines = fallbackLyricsLines,
         currentPositionMs = currentPositionMs,
         modifier = modifier
-            .then(
-                if (keepLyricsScreenAwake) {
-                    Modifier.keepScreenOn()
-                } else {
-                    Modifier
-                },
-            )
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = {

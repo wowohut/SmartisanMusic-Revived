@@ -178,6 +178,8 @@
     <string name="sleep_timer">Sleep timer</string>
     <string name="lyrics">Lyrics</string>
     <string name="always_on">Keep screen on</string>
+    <string name="screen_light_on">Screen Timeout Disabled</string>
+    <string name="screen_light_off">Screen Timeout Enabled</string>
     <string name="player_axis_enabled">Hide turntable spindle</string>
     <string name="popcorn_sound">Vinyl crackle</string>
     <string name="artist_separators">Artist separators</string>

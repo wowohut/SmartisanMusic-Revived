@@ -1,10 +1,13 @@
 package com.smartisanos.music.ui.playback
 
 import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import android.provider.MediaStore
 import android.provider.Settings
+import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -443,6 +446,20 @@ fun PlaybackScreen(
         }
     }
 
+    val keepLyricsScreenOn = currentVisualPage == PlaybackVisualPage.Lyrics &&
+        keepLyricsScreenAwake
+    DisposableEffect(context, keepLyricsScreenOn) {
+        val window = context.findActivity()?.window
+        if (keepLyricsScreenOn) {
+            window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
     LaunchedEffect(controller, state.mediaItem?.mediaId) {
         val playbackController = controller ?: return@LaunchedEffect
         while (isActive) {
@@ -756,7 +773,15 @@ fun PlaybackScreen(
                     },
                     onVisualPageToggle = ::toggleVisualPage,
                     onKeepLyricsScreenAwakeToggle = {
-                        keepLyricsScreenAwake = !keepLyricsScreenAwake
+                        val enabled = !keepLyricsScreenAwake
+                        keepLyricsScreenAwake = enabled
+                        context.toast(
+                            if (enabled) {
+                                R.string.screen_light_on
+                            } else {
+                                R.string.screen_light_off
+                            },
+                        )
                     },
                     onDiscScratchStart = {
                         scratchFlingJob?.cancel()
@@ -1090,6 +1115,14 @@ fun PlaybackScreen(
 
 private val PlaybackScreenState.canReorderUpcomingQueue: Boolean
     get() = !shuffleEnabled && repeatMode != Player.REPEAT_MODE_ALL
+
+private tailrec fun Context.findActivity(): Activity? {
+    return when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> null
+    }
+}
 
 private const val PlaybackPositionPlayingRefreshMs = 250L
 private const val PlaybackPositionIdleRefreshMs = 500L

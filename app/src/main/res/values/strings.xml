@@ -171,6 +171,8 @@
     <string name="sleep_timer">定时关闭播放</string>
     <string name="lyrics">歌词</string>
     <string name="always_on">常亮</string>
+    <string name="screen_light_on">你已开启了屏幕常亮</string>
+    <string name="screen_light_off">你已关闭了屏幕常亮</string>
     <string name="player_axis_enabled">隐藏唱机中轴</string>
     <string name="popcorn_sound">唱盘爆豆音</string>
     <string name="artist_separators">艺术家分隔符</string>
