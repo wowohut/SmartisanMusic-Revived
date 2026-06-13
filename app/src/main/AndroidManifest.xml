@@ -4,6 +4,7 @@
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
@@ -21,6 +22,13 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.Music">
+        <activity
+            android:name=".ui.online.NeteaseWebLoginActivity"
+            android:exported="false"
+            android:label="@string/netease_login_title"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Music" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

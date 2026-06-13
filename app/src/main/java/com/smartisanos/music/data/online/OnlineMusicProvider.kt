@@ -1,0 +1,214 @@
+package com.smartisanos.music.data.online
+
+import androidx.media3.common.MediaItem
+
+internal enum class OnlineMusicProvider(
+    val sourceId: String,
+) {
+    Netease(sourceId = "netease"),
+}
+
+internal const val OnlineMediaIdPrefix = "online:"
+internal const val OnlineTrackExtraKey = "com.smartisanos.music.extra.ONLINE_TRACK"
+internal const val OnlineProviderExtraKey = "com.smartisanos.music.extra.ONLINE_PROVIDER"
+internal const val OnlineSourceExtraKey = "com.smartisanos.music.extra.ONLINE_SOURCE"
+internal const val OnlineTrackIdExtraKey = "com.smartisanos.music.extra.ONLINE_TRACK_ID"
+internal const val OnlineLyricsExtraKey = "com.smartisanos.music.extra.ONLINE_LYRICS"
+internal const val OnlineTranslatedLyricsExtraKey = "com.smartisanos.music.extra.ONLINE_TRANSLATED_LYRICS"
+internal const val OnlinePlaybackResolvedAtExtraKey = "com.smartisanos.music.extra.ONLINE_PLAYBACK_RESOLVED_AT"
+
+internal data class OnlineAccountPlaylist(
+    val provider: OnlineMusicProvider,
+    val playlistId: String,
+    val title: String,
+    val trackCount: Int,
+    val isLikedSongs: Boolean = false,
+    val subtitle: String? = null,
+    val artworkUrl: String? = null,
+)
+
+internal data class OnlineArtist(
+    val provider: OnlineMusicProvider,
+    val artistId: String,
+    val name: String,
+    val subtitle: String? = null,
+    val artworkUrl: String? = null,
+    val trackCount: Int = 0,
+    val albumCount: Int = 0,
+)
+
+internal data class OnlineArtistIntroduction(
+    val title: String,
+    val text: String,
+)
+
+internal data class OnlineBanner(
+    val provider: OnlineMusicProvider,
+    val bannerId: String,
+    val title: String,
+    val subtitle: String? = null,
+    val imageUrl: String? = null,
+    val targetTrackId: String? = null,
+    val targetAlbumId: String? = null,
+    val targetPlaylistId: String? = null,
+)
+
+internal enum class OnlinePlaylistKind {
+    Featured,
+    Chart,
+}
+
+internal data class OnlinePlaylist(
+    val provider: OnlineMusicProvider,
+    val playlistId: String,
+    val title: String,
+    val subtitle: String? = null,
+    val artworkUrl: String? = null,
+    val trackCount: Int = 0,
+    val playCount: Long = 0L,
+    val kind: OnlinePlaylistKind = OnlinePlaylistKind.Featured,
+)
+
+internal data class OnlineAlbum(
+    val provider: OnlineMusicProvider,
+    val albumId: String,
+    val title: String,
+    val artist: String? = null,
+    val artworkUrl: String? = null,
+    val trackCount: Int = 0,
+    val publishTimeMs: Long = 0L,
+)
+
+internal data class OnlineRadio(
+    val provider: OnlineMusicProvider,
+    val radioId: String,
+    val title: String,
+    val subtitle: String? = null,
+    val category: String? = null,
+    val creator: String? = null,
+    val artworkUrl: String? = null,
+    val programCount: Int = 0,
+    val playCount: Long = 0L,
+)
+
+internal data class OnlineMusicHome(
+    val tracks: List<OnlineTrack> = emptyList(),
+    val playlists: List<OnlinePlaylist> = emptyList(),
+    val charts: List<OnlinePlaylist> = emptyList(),
+    val albums: List<OnlineAlbum> = emptyList(),
+    val artists: List<OnlineArtist> = emptyList(),
+)
+
+internal data class OnlineRadioHome(
+    val tracks: List<OnlineTrack> = emptyList(),
+    val radios: List<OnlineRadio> = emptyList(),
+) {
+    val isEmpty: Boolean
+        get() = tracks.isEmpty() && radios.isEmpty()
+}
+
+internal data class OnlineSearchResults(
+    val query: String,
+    val tracks: List<OnlineTrack> = emptyList(),
+    val artists: List<OnlineArtist> = emptyList(),
+    val albums: List<OnlineAlbum> = emptyList(),
+    val playlists: List<OnlinePlaylist> = emptyList(),
+) {
+    val hasResults: Boolean
+        get() = tracks.isNotEmpty() ||
+            artists.isNotEmpty() ||
+            albums.isNotEmpty() ||
+            playlists.isNotEmpty()
+}
+
+internal data class OnlineSearchHotKeyword(
+    val keyword: String,
+    val subtitle: String? = null,
+    val score: Long = 0L,
+)
+
+internal interface OnlineMusicProviderRepository {
+    val provider: OnlineMusicProvider
+
+    suspend fun search(query: String): List<OnlineTrack>
+
+    suspend fun searchAll(query: String): OnlineSearchResults {
+        val normalizedQuery = query.trim()
+        if (normalizedQuery.isEmpty()) {
+            return OnlineSearchResults(query = normalizedQuery)
+        }
+        return OnlineSearchResults(
+            query = normalizedQuery,
+            tracks = search(normalizedQuery),
+            artists = searchArtists(normalizedQuery),
+            albums = searchAlbums(normalizedQuery),
+            playlists = searchPlaylists(normalizedQuery),
+        )
+    }
+
+    suspend fun searchArtists(query: String): List<OnlineArtist> = emptyList()
+
+    suspend fun searchAlbums(query: String): List<OnlineAlbum> = emptyList()
+
+    suspend fun searchPlaylists(query: String): List<OnlinePlaylist> = emptyList()
+
+    suspend fun searchHotKeywords(): List<OnlineSearchHotKeyword> = emptyList()
+
+    suspend fun track(trackId: String): OnlineTrack? = null
+
+    suspend fun featuredTracks(): List<OnlineTrack>
+
+    suspend fun featuredHome(): OnlineMusicHome = OnlineMusicHome(
+        tracks = featuredTracks(),
+        playlists = featuredPlaylists(),
+        charts = featuredCharts(),
+        albums = featuredAlbums(),
+        artists = featuredArtists(),
+    )
+
+    suspend fun featuredBanners(): List<OnlineBanner> = emptyList()
+
+    suspend fun featuredPlaylists(): List<OnlinePlaylist> = emptyList()
+
+    suspend fun featuredCharts(): List<OnlinePlaylist> = emptyList()
+
+    suspend fun featuredAlbums(): List<OnlineAlbum> = emptyList()
+
+    suspend fun featuredArtists(): List<OnlineArtist> = emptyList()
+
+    suspend fun featuredRadioTracks(): List<OnlineTrack> = emptyList()
+
+    suspend fun featuredRadios(): List<OnlineRadio> = emptyList()
+
+    suspend fun featuredRadioHome(): OnlineRadioHome = OnlineRadioHome(
+        tracks = featuredRadioTracks(),
+        radios = featuredRadios(),
+    )
+
+    suspend fun accountPlaylists(): List<OnlineAccountPlaylist>? = null
+
+    suspend fun accountPlaylistTracks(playlist: OnlineAccountPlaylist): List<OnlineTrack> = emptyList()
+
+    suspend fun playlistTracks(playlist: OnlinePlaylist): List<OnlineTrack> = emptyList()
+
+    suspend fun albumTracks(album: OnlineAlbum): List<OnlineTrack> = emptyList()
+
+    suspend fun artistTopTracks(artist: OnlineArtist): List<OnlineTrack> = emptyList()
+
+    suspend fun artistAlbums(artist: OnlineArtist): List<OnlineAlbum> = emptyList()
+
+    suspend fun artistIntroduction(artist: OnlineArtist): List<OnlineArtistIntroduction> = emptyList()
+
+    suspend fun radioTracks(radio: OnlineRadio): List<OnlineTrack> = emptyList()
+
+    suspend fun resolvePlayableMediaItem(mediaItem: MediaItem): MediaItem?
+
+    suspend fun resolvePlayableMediaItems(
+        mediaItems: List<MediaItem>,
+        includeLyrics: Boolean = false,
+    ): List<MediaItem> {
+        return mediaItems.mapNotNull { item ->
+            resolvePlayableMediaItem(item)
+        }
+    }
+}

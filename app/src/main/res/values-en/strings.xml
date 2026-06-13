@@ -110,6 +110,8 @@
     <string name="search_tab_songs">Songs</string>
     <string name="search_tab_albums">Albums</string>
     <string name="search_tab_artists">Artists</string>
+    <string name="netease_login_title">Log in to NetEase Cloud Music</string>
+    <string name="netease_login_cookie_missing">Tap Done after logging in</string>
     <string name="search_no_result">No results</string>
     <string name="search_no_result_subtitle">No matching songs, albums, or artists found</string>
     <string name="library_root">Local Music</string>
