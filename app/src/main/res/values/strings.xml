@@ -209,6 +209,7 @@
     <string name="netease_logout_success">已退出网易云</string>
     <string name="online_music_login_required">请先登录网易云音乐</string>
     <string name="netease_online_music_play_failed">无法播放，请确认网易云账号可播放</string>
+    <string name="online_music_play_failed">无法播放该在线音乐</string>
     <string name="search_no_result">无搜索结果</string>
     <string name="search_no_result_subtitle">没有找到相关歌曲、专辑或艺术家</string>
     <string name="library_root">本地音乐</string>

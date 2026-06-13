@@ -215,6 +215,7 @@
     <string name="netease_logout_success">Logged out of NetEase</string>
     <string name="online_music_login_required">Log in to NetEase Cloud Music first</string>
     <string name="netease_online_music_play_failed">Cannot play. Check NetEase account access.</string>
+    <string name="online_music_play_failed">Cannot play this online track.</string>
     <string name="search_no_result">No results</string>
     <string name="search_no_result_subtitle">No matching songs, albums, or artists found</string>
     <string name="library_root">Local Music</string>

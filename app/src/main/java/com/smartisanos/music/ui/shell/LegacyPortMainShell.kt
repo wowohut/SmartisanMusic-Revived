@@ -41,12 +41,15 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
 import androidx.media3.session.SessionResult
 import com.smartisanos.music.ExternalAudioLaunchRequest
 import com.smartisanos.music.R
 import com.smartisanos.music.data.favorite.FavoriteSongsRepository
 import com.smartisanos.music.data.library.LibraryExclusions
 import com.smartisanos.music.data.library.LibraryExclusionsStore
+import com.smartisanos.music.data.online.OnlineMusicRepositoryRouter
+import com.smartisanos.music.data.online.isOnlineMediaItem
 import com.smartisanos.music.data.playlist.PlaylistCreateResult
 import com.smartisanos.music.data.playlist.PlaylistRepository
 import com.smartisanos.music.data.settings.ArtistSettings
@@ -93,6 +96,7 @@ import kotlinx.coroutines.withContext
 
 private enum class LegacyTrackActionSource {
     Library,
+    CloudMusic,
     Loved,
     Playlist,
 }
@@ -133,6 +137,9 @@ private fun LegacyPortMainShellContent(
     }
     val playlistRepository = remember(context.applicationContext) {
         PlaylistRepository.getInstance(context.applicationContext)
+    }
+    val onlineMusicRepository = remember(context.applicationContext) {
+        OnlineMusicRepositoryRouter(context.applicationContext)
     }
     val libraryExclusionsStore = remember(context.applicationContext) {
         LibraryExclusionsStore(context.applicationContext)
@@ -262,6 +269,13 @@ private fun LegacyPortMainShellContent(
                     playbackBarContentSnapshot = nextSnapshot
                 }
             }
+
+            override fun onPlayerError(error: PlaybackException) {
+                val failedItem = controller.currentMediaItem
+                if (failedItem?.isOnlineMediaItem() == true) {
+                    Toast.makeText(context, R.string.online_music_play_failed, Toast.LENGTH_SHORT).show()
+                }
+            }
         }
         controller.addListener(listener)
         val initialSnapshot = LegacyPlaybackBarSnapshot(
@@ -308,7 +322,7 @@ private fun LegacyPortMainShellContent(
         controller.removeMediaItemsByMediaIds(mediaIds)
     }
 
-    fun enqueueMediaItems(items: List<MediaItem>) {
+    fun enqueueResolvedMediaItems(items: List<MediaItem>) {
         if (items.isEmpty()) {
             return
         }
@@ -323,9 +337,34 @@ private fun LegacyPortMainShellContent(
         }
     }
 
+    fun enqueueMediaItems(items: List<MediaItem>) {
+        if (items.none(MediaItem::isOnlineMediaItem)) {
+            enqueueResolvedMediaItems(items)
+            return
+        }
+        scope.launch {
+            val resolvedItems = withContext(Dispatchers.IO) {
+                items.mapNotNull { item ->
+                    when {
+                        !item.isOnlineMediaItem() -> item
+                        item.localConfiguration?.uri != null -> item
+                        else -> runCatching {
+                            onlineMusicRepository.resolvePlayableMediaItem(item)
+                        }.getOrNull()
+                    }
+                }
+            }
+            if (resolvedItems.isEmpty()) {
+                Toast.makeText(context, R.string.online_music_play_failed, Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            enqueueResolvedMediaItems(resolvedItems)
+        }
+    }
+
     fun requestAddToPlaylist(items: List<MediaItem>) {
         val candidates = items.filter { item ->
-            item.mediaId.isNotBlank() && !item.isExternalAudioLaunchItem()
+            item.mediaId.isNotBlank() && !item.isExternalAudioLaunchItem() && !item.isOnlineMediaItem()
         }
         if (candidates.isNotEmpty()) {
             pendingPlaylistPickerMediaItems = candidates
@@ -761,6 +800,9 @@ private fun LegacyPortMainShellContent(
                 onLibraryTrackMoreClick = { item ->
                     showTrackActions(item, LegacyTrackActionSource.Library)
                 },
+                onCloudMusicTrackMoreClick = { item ->
+                    showTrackActions(item, LegacyTrackActionSource.CloudMusic)
+                },
                 onLovedSongsTrackMoreClick = { item ->
                     showTrackActions(item, LegacyTrackActionSource.Loved)
                 },
@@ -868,13 +910,17 @@ private fun LegacyPortMainShellContent(
         val trackActionItems = pendingTrackActionItem?.let { actionItem ->
             val mediaId = actionItem.mediaId
             val isFavorite = mediaId in favoriteIds
-            val canPersist = mediaId.isNotBlank() && !actionItem.isExternalAudioLaunchItem()
+            val canAddToPlaylist = mediaId.isNotBlank() &&
+                !actionItem.isExternalAudioLaunchItem() &&
+                !actionItem.isOnlineMediaItem()
+            val canFavorite = mediaId.isNotBlank() &&
+                !actionItem.isExternalAudioLaunchItem()
             val actions = mutableListOf(
                 LegacyTrackActionItem(
                     labelRes = R.string.add_to_playlist,
                     iconRes = R.drawable.more_select_icon_addlist,
                     pressedIconRes = R.drawable.more_select_icon_addlist_down,
-                    enabled = canPersist,
+                    enabled = canAddToPlaylist,
                     onClick = {
                         dismissTrackActions()
                         requestAddToPlaylist(listOf(actionItem))
@@ -901,11 +947,11 @@ private fun LegacyPortMainShellContent(
                     } else {
                         R.drawable.more_select_icon_favorite_add_down
                     },
-                    enabled = canPersist,
+                    enabled = canFavorite,
                     selected = isFavorite,
                     onClick = {
                         dismissTrackActions()
-                        if (canPersist) {
+                        if (canFavorite) {
                             scope.launch {
                                 favoriteRepository.toggle(mediaId)
                             }
