@@ -816,7 +816,7 @@ private fun TextView.legacyAlbumActionText(
     isClickable = true
     isFocusable = true
     setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.button_text_size))
-    setTextColor(context.colorStateListCompat(R.drawable.text_color_download_selector))
+    setTextColor(context.colorStateListCompat(R.drawable.text_color_album_action_selector))
     setCompoundDrawablesWithIntrinsicBounds(iconRes, 0, 0, 0)
     compoundDrawablePadding = dp(7)
     return this

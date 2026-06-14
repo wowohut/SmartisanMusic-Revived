@@ -141,7 +141,6 @@
     <string name="cloud_music_logout_confirm_action">Log out</string>
     <string name="online_music_settings_title">Online Music</string>
     <string name="online_music_play_quality">Online Playback Quality</string>
-    <string name="online_music_download_quality">Download Quality</string>
     <string name="online_music_quality_standard">Standard</string>
     <string name="online_music_quality_higher">Higher</string>
     <string name="online_music_quality_exhigh">Very High</string>

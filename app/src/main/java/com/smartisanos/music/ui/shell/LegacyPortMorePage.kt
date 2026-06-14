@@ -121,7 +121,6 @@ internal fun LegacyPortMorePage(
     onAudioFxCustomGainDbPointsChange: (List<Float>) -> Unit,
     onArtistSeparatorsChange: (Set<String>) -> Unit,
     onNeteasePlaybackQualityChange: (NeteaseAudioQuality) -> Unit,
-    onNeteaseDownloadQualityChange: (NeteaseAudioQuality) -> Unit,
     onMediaIdsHidden: (Set<String>) -> Unit,
     onRequestDeleteMediaIds: (Set<String>) -> Unit,
     onLovedSongsTrackMoreClick: (MediaItem) -> Unit,
@@ -233,7 +232,6 @@ internal fun LegacyPortMorePage(
                     onAudioFxCustomGainDbPointsChange = onAudioFxCustomGainDbPointsChange,
                     onArtistSeparatorsChange = onArtistSeparatorsChange,
                     onNeteasePlaybackQualityChange = onNeteasePlaybackQualityChange,
-                    onNeteaseDownloadQualityChange = onNeteaseDownloadQualityChange,
                     modifier = Modifier.fillMaxSize(),
                 )
             }

@@ -635,7 +635,6 @@ private class LegacyLovedSongsAdapter(
         findViewById<View>(R.id.ll_left)?.visibility = View.VISIBLE
         findViewById<View>(R.id.rl_right)?.visibility = View.GONE
         findViewById<View>(R.id.btn_more)?.visibility = if (editMode) View.GONE else View.VISIBLE
-        findViewById<View>(R.id.music_download_view)?.visibility = if (editMode) View.INVISIBLE else View.VISIBLE
         (this as? EditableLayout)?.bindLegacyEditState(
             enabled = editMode,
             checked = checked,

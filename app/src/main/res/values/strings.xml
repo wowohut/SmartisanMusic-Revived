@@ -135,7 +135,6 @@
     <string name="cloud_music_logout_confirm_action">退出登录</string>
     <string name="online_music_settings_title">在线音乐</string>
     <string name="online_music_play_quality">在线播放音质</string>
-    <string name="online_music_download_quality">下载音质</string>
     <string name="online_music_quality_standard">标准</string>
     <string name="online_music_quality_higher">较高</string>
     <string name="online_music_quality_exhigh">极高</string>

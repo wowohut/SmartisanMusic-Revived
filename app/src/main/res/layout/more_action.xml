@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout android:gravity="center_vertical" android:orientation="horizontal" android:id="@id/ll_left" android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_alignParentRight="true" android:layout_centerVertical="true"
   xmlns:android="http://schemas.android.com/apk/res/android">
-    <com.smartisanos.music.ui.widgets.DownloadArcView android:id="@id/music_download_view" android:duplicateParentState="true" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginRight="@dimen/listview_items_margin_right" android:src="@drawable/drawable_local_phone" android:scaleType="fitCenter" />
     <ImageButton android:id="@id/btn_more" android:background="@null" android:duplicateParentState="true" android:layout_width="@dimen/listview_item_height" android:layout_height="match_parent" android:src="@drawable/btn_more_selector" android:scaleType="center" android:contentDescription="@string/tab_more" />
 </LinearLayout>

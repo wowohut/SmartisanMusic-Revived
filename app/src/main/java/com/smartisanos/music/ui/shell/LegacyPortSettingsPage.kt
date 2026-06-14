@@ -89,7 +89,6 @@ internal fun LegacyPortSettingsPage(
     onAudioFxCustomGainDbPointsChange: (List<Float>) -> Unit,
     onArtistSeparatorsChange: (Set<String>) -> Unit,
     onNeteasePlaybackQualityChange: (NeteaseAudioQuality) -> Unit,
-    onNeteaseDownloadQualityChange: (NeteaseAudioQuality) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -107,10 +106,9 @@ internal fun LegacyPortSettingsPage(
     var neteaseAuthState by remember { mutableStateOf(authStore.load()) }
     var neteaseAuthRevision by remember { mutableStateOf(0) }
     var logoutConfirmVisible by remember { mutableStateOf(false) }
-    var qualityDialogTarget by remember { mutableStateOf<LegacyOnlineQualityTarget?>(null) }
+    var playbackQualityDialogVisible by remember { mutableStateOf(false) }
     val latestOnArtistSeparatorsChange by rememberUpdatedState(onArtistSeparatorsChange)
     val latestOnNeteasePlaybackQualityChange by rememberUpdatedState(onNeteasePlaybackQualityChange)
-    val latestOnNeteaseDownloadQualityChange by rememberUpdatedState(onNeteaseDownloadQualityChange)
     val loginLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -182,10 +180,7 @@ internal fun LegacyPortSettingsPage(
                     }
                 },
                 onNeteasePlaybackQualityClick = {
-                    qualityDialogTarget = LegacyOnlineQualityTarget.Playback
-                },
-                onNeteaseDownloadQualityClick = {
-                    qualityDialogTarget = LegacyOnlineQualityTarget.Download
+                    playbackQualityDialogVisible = true
                 },
                 onScratchEnabledChange = onScratchEnabledChange,
                 onHidePlayerAxisEnabledChange = onHidePlayerAxisEnabledChange,
@@ -231,31 +226,21 @@ internal fun LegacyPortSettingsPage(
         },
     )
 
-    val activeQualityDialogTarget = qualityDialogTarget
-    if (activeQualityDialogTarget != null) {
-        val selectedQuality = when (activeQualityDialogTarget) {
-            LegacyOnlineQualityTarget.Playback -> onlineMusicSettings.neteasePlaybackQuality
-            LegacyOnlineQualityTarget.Download -> onlineMusicSettings.neteaseDownloadQuality
-        }
-        val title = when (activeQualityDialogTarget) {
-            LegacyOnlineQualityTarget.Playback -> context.getString(R.string.online_music_play_quality)
-            LegacyOnlineQualityTarget.Download -> context.getString(R.string.online_music_download_quality)
-        }
-        DisposableEffect(activeQualityDialogTarget, selectedQuality, title) {
+    if (playbackQualityDialogVisible) {
+        val selectedQuality = onlineMusicSettings.neteasePlaybackQuality
+        val title = context.getString(R.string.online_music_play_quality)
+        DisposableEffect(selectedQuality, title) {
             val dialog = LegacyOnlineQualityDialog(
                 context = context,
                 title = title,
                 selectedQuality = selectedQuality,
                 onDismiss = {
-                    qualityDialogTarget = null
+                    playbackQualityDialogVisible = false
                 },
                 onSelect = { quality ->
-                    qualityDialogTarget = null
+                    playbackQualityDialogVisible = false
                     scope.launch {
-                        when (activeQualityDialogTarget) {
-                            LegacyOnlineQualityTarget.Playback -> latestOnNeteasePlaybackQualityChange(quality)
-                            LegacyOnlineQualityTarget.Download -> latestOnNeteaseDownloadQualityChange(quality)
-                        }
+                        latestOnNeteasePlaybackQualityChange(quality)
                     }
                 },
             )
@@ -312,7 +297,6 @@ private fun LegacySettingsRootPage(
     onClose: () -> Unit,
     onNeteaseAccountClick: () -> Unit,
     onNeteasePlaybackQualityClick: () -> Unit,
-    onNeteaseDownloadQualityClick: () -> Unit,
     onScratchEnabledChange: (Boolean) -> Unit,
     onHidePlayerAxisEnabledChange: (Boolean) -> Unit,
     onPopcornSoundEnabledChange: (Boolean) -> Unit,
@@ -350,7 +334,6 @@ private fun LegacySettingsRootPage(
                     neteaseAuthState = neteaseAuthState,
                     onNeteaseAccountClick = onNeteaseAccountClick,
                     onNeteasePlaybackQualityClick = onNeteasePlaybackQualityClick,
-                    onNeteaseDownloadQualityClick = onNeteaseDownloadQualityClick,
                     onScratchEnabledChange = onScratchEnabledChange,
                     onHidePlayerAxisEnabledChange = onHidePlayerAxisEnabledChange,
                     onPopcornSoundEnabledChange = onPopcornSoundEnabledChange,
@@ -414,11 +397,6 @@ private enum class LegacySettingsRowShape(
     Top(R.drawable.group_list_item_bg_top, R.drawable.list_content_item_top_shadow),
     Middle(R.drawable.group_list_item_bg_mid, R.drawable.list_content_item_middle_shadow),
     Bottom(R.drawable.group_list_item_bg_bottom, R.drawable.list_content_item_bottom_shadow),
-}
-
-private enum class LegacyOnlineQualityTarget {
-    Playback,
-    Download,
 }
 
 private enum class LegacySettingsSecondaryPage {
@@ -513,7 +491,6 @@ private class LegacySettingsContentView(context: Context) : ScrollView(context) 
     }
     private val neteaseAccountRow = LegacySettingsValueRow(context, R.string.cloud_music_account_netease)
     private val playQualityRow = LegacySettingsValueRow(context, R.string.online_music_play_quality)
-    private val downloadQualityRow = LegacySettingsValueRow(context, R.string.online_music_download_quality)
     private val scratchRow = LegacySettingsSwitchRow(context, R.string.djing)
     private val axisRow = LegacySettingsSwitchRow(context, R.string.player_axis_enabled)
     private val popcornRow = LegacySettingsSwitchRow(context, R.string.popcorn_sound)
@@ -545,8 +522,7 @@ private class LegacySettingsContentView(context: Context) : ScrollView(context) 
         content.addView(
             settingsGroup(
                 context,
-                playQualityRow to LegacySettingsRowShape.Top,
-                downloadQualityRow to LegacySettingsRowShape.Bottom,
+                playQualityRow to LegacySettingsRowShape.Single,
             ),
         )
         content.addView(gapView(context))
@@ -581,7 +557,6 @@ private class LegacySettingsContentView(context: Context) : ScrollView(context) 
         neteaseAuthState: NeteaseAuthState,
         onNeteaseAccountClick: () -> Unit,
         onNeteasePlaybackQualityClick: () -> Unit,
-        onNeteaseDownloadQualityClick: () -> Unit,
         onScratchEnabledChange: (Boolean) -> Unit,
         onHidePlayerAxisEnabledChange: (Boolean) -> Unit,
         onPopcornSoundEnabledChange: (Boolean) -> Unit,
@@ -595,10 +570,6 @@ private class LegacySettingsContentView(context: Context) : ScrollView(context) 
         playQualityRow.bind(
             value = onlineMusicSettings.neteasePlaybackQuality.label(context),
             onClick = onNeteasePlaybackQualityClick,
-        )
-        downloadQualityRow.bind(
-            value = onlineMusicSettings.neteaseDownloadQuality.label(context),
-            onClick = onNeteaseDownloadQualityClick,
         )
         scratchRow.bind(settings.scratchEnabled, onScratchEnabledChange)
         axisRow.bind(settings.hidePlayerAxisEnabled, onHidePlayerAxisEnabledChange)

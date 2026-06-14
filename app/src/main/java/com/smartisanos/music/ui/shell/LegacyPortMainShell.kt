@@ -765,11 +765,6 @@ private fun LegacyPortMainShellContent(
                         onlineMusicSettingsStore.setNeteasePlaybackQuality(quality)
                     }
                 },
-                onNeteaseDownloadQualityChange = { quality ->
-                    scope.launch {
-                        onlineMusicSettingsStore.setNeteaseDownloadQuality(quality)
-                    }
-                },
                 onMediaIdsHidden = ::reclaimHiddenMediaIds,
                 onRequestDeleteMediaIds = ::requestSystemDeleteMediaIds,
                 onRequestSongDeleteConfirmation = { mediaIds, onDismiss ->

@@ -18,7 +18,6 @@ private val Context.onlineMusicSettingsDataStore by preferencesDataStore(
 
 data class OnlineMusicSettings(
     val neteasePlaybackQuality: NeteaseAudioQuality = NeteaseAudioQuality.ExHigh,
-    val neteaseDownloadQuality: NeteaseAudioQuality = NeteaseAudioQuality.ExHigh,
 )
 
 enum class NeteaseAudioQuality(
@@ -79,20 +78,12 @@ class OnlineMusicSettingsStore(
             preferences[NeteasePlaybackQualityKey] = quality.preferenceValue
         }
     }
-
-    suspend fun setNeteaseDownloadQuality(quality: NeteaseAudioQuality) {
-        context.onlineMusicSettingsDataStore.edit { preferences ->
-            preferences[NeteaseDownloadQualityKey] = quality.preferenceValue
-        }
-    }
 }
 
 private fun Preferences.toOnlineMusicSettings(): OnlineMusicSettings {
     return OnlineMusicSettings(
         neteasePlaybackQuality = NeteaseAudioQuality.fromPreference(this[NeteasePlaybackQualityKey]),
-        neteaseDownloadQuality = NeteaseAudioQuality.fromPreference(this[NeteaseDownloadQualityKey]),
     )
 }
 
 private val NeteasePlaybackQualityKey = stringPreferencesKey("netease_playback_quality")
-private val NeteaseDownloadQualityKey = stringPreferencesKey("netease_download_quality")
