@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.smartisanos.music.ui.album.AlbumSummary
 import com.smartisanos.music.ui.artist.ArtistSummary
+import com.smartisanos.music.ui.shell.titlebar.LegacyPortTitleBarTransition
 
 internal data class LegacySelectedArtistState(
     val artist: ArtistSummary,
@@ -25,7 +26,7 @@ internal fun LegacyPortArtistTitleStack(
     content: @Composable (LegacyArtistTarget?, Modifier) -> Unit,
 ) {
     val titleEntry = selectedTarget?.toTitleStackEntry()
-    LegacyPortPageStackTransition(
+    LegacyPortTitleBarTransition(
         secondaryKey = titleEntry,
         modifier = modifier,
         label = "legacy artist title transition",
@@ -44,7 +45,7 @@ internal fun LegacyPortArtistTitleStack(
                     val nestedTarget = selectedTarget?.takeIf { target ->
                         target.artistId == entry.artistId && target !is LegacyArtistTarget.Albums
                     }
-                    LegacyPortPageStackTransition(
+                    LegacyPortTitleBarTransition(
                         secondaryKey = nestedTarget,
                         modifier = Modifier.fillMaxSize(),
                         label = "legacy artist nested title transition",

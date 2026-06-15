@@ -23,6 +23,7 @@ import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.viewinterop.AndroidView
 import com.smartisanos.music.R
 import com.smartisanos.music.ui.shell.titlebar.LegacyPortSmartisanTitleBar
+import com.smartisanos.music.ui.shell.titlebar.LegacyPortTitleBarTransition
 import smartisanos.widget.TitleBar
 
 @Composable
@@ -73,7 +74,7 @@ internal fun LegacyPlaylistTitleArea(
             )
         }
     }
-    LegacyPortPageStackTransition(
+    LegacyPortTitleBarTransition(
         secondaryKey = titleTarget,
         modifier = modifier
             .fillMaxWidth()

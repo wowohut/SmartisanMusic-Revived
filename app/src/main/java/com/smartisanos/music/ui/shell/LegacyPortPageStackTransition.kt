@@ -1,6 +1,6 @@
 package com.smartisanos.music.ui.shell
 
-import androidx.activity.compose.PredictiveBackHandler
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
@@ -23,19 +23,21 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.zIndex
-import java.util.concurrent.CancellationException
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 import kotlin.math.cos
 import kotlin.math.roundToInt
 
 internal const val LegacyPageStackSlideMillis = 300
-private val LegacyPageStackEasing = Easing { fraction ->
+private val LegacyPageStackPushEasing = Easing { fraction ->
     ((cos((fraction + 1f) * Math.PI) / 2.0) + 0.5).toFloat()
 }
-private val LegacyPageStackDecelerateEasing = Easing { fraction ->
-    1f - ((1f - fraction) * (1f - fraction))
+private val LegacyPageStackPopEasing = Easing { fraction ->
+    val inverse = 1f - fraction
+    1f - (inverse * inverse)
+}
+private val LegacyPageStackVerticalEasing = Easing { fraction ->
+    val inverse = 1f - fraction
+    1f - (inverse * inverse * inverse)
 }
 
 internal enum class LegacyPortPageStackAxis {
@@ -76,53 +78,9 @@ internal fun LegacyPortPredictiveBackHandler(
     state: LegacyPortPredictiveBackState,
     onBack: () -> Unit,
 ) {
-    val animation = remember { Animatable(0f) }
-    PredictiveBackHandler(enabled = enabled) { progress ->
-        var hasGestureProgress = false
-        try {
-            animation.snapTo(0f)
-            state.reset()
-            progress.collect { backEvent ->
-                hasGestureProgress = true
-                animation.snapTo(backEvent.progress.coerceIn(0f, 1f))
-                state.update(animation.value)
-            }
-            if (hasGestureProgress) {
-                animation.animateTo(
-                    targetValue = 1f,
-                    animationSpec = tween(
-                        durationMillis = ((1f - animation.value) * LegacyPageStackSlideMillis)
-                            .roundToInt()
-                            .coerceIn(80, LegacyPageStackSlideMillis),
-                        easing = LegacyPageStackEasing,
-                    ),
-                ) {
-                    state.update(value)
-                }
-                onBack()
-                animation.snapTo(0f)
-                state.consumeExit()
-            } else {
-                state.reset()
-                onBack()
-            }
-        } catch (e: CancellationException) {
-            if (hasGestureProgress || state.progress != null) {
-                withContext(NonCancellable) {
-                    animation.animateTo(
-                        targetValue = 0f,
-                        animationSpec = tween(
-                            durationMillis = LegacyPageStackSlideMillis,
-                            easing = LegacyPageStackEasing,
-                        ),
-                    ) {
-                        state.update(value)
-                    }
-                }
-            }
-            state.reset()
-            throw e
-        }
+    BackHandler(enabled = enabled) {
+        state.reset()
+        onBack()
     }
 }
 
@@ -181,7 +139,7 @@ internal fun <T : Any> LegacyPortPageStackTransition(
                     targetValue = 0f,
                     animationSpec = tween(
                         durationMillis = LegacyPageStackSlideMillis,
-                        easing = LegacyPageStackEasing,
+                        easing = LegacyPageStackPopEasing,
                     ),
                 )
                 retainedSecondaryKey = secondaryKey
@@ -199,7 +157,7 @@ internal fun <T : Any> LegacyPortPageStackTransition(
                     targetValue = 1f,
                     animationSpec = tween(
                         durationMillis = LegacyPageStackSlideMillis,
-                        easing = LegacyPageStackEasing,
+                        easing = LegacyPageStackPushEasing,
                     ),
                 )
             }
@@ -211,7 +169,7 @@ internal fun <T : Any> LegacyPortPageStackTransition(
                     targetValue = 0f,
                     animationSpec = tween(
                         durationMillis = LegacyPageStackSlideMillis,
-                        easing = LegacyPageStackEasing,
+                        easing = LegacyPageStackPopEasing,
                     ),
                 )
             }
@@ -319,7 +277,7 @@ internal fun <T : Any> LegacyPortPageStackTransition(
                     enter = slideInVertically(
                         animationSpec = tween(
                             durationMillis = LegacyPageStackSlideMillis,
-                            easing = LegacyPageStackDecelerateEasing,
+                            easing = LegacyPageStackVerticalEasing,
                         ),
                         initialOffsetY = { it },
                     ),
@@ -329,7 +287,7 @@ internal fun <T : Any> LegacyPortPageStackTransition(
                         slideOutVertically(
                             animationSpec = tween(
                                 durationMillis = LegacyPageStackSlideMillis,
-                                easing = LegacyPageStackDecelerateEasing,
+                                easing = LegacyPageStackVerticalEasing,
                             ),
                             targetOffsetY = { it },
                         )

@@ -161,6 +161,15 @@
     <string name="online_music_quality_hd_surround">高清环绕声</string>
     <string name="online_music_quality_surround">沉浸环绕声</string>
     <string name="online_music_quality_master">超清母带</string>
+    <string name="online_music_quality_summary_standard">MP3 · 128K</string>
+    <string name="online_music_quality_summary_higher">MP3 · 192K</string>
+    <string name="online_music_quality_summary_exhigh">MP3 · 320K</string>
+    <string name="online_music_quality_summary_lossless">FLAC · 约 1000K</string>
+    <string name="online_music_quality_summary_hires">FLAC · 约 1600K 以上</string>
+    <string name="online_music_quality_summary_hd_surround">FLAC · 24bit/96kHz</string>
+    <string name="online_music_quality_summary_surround">FLAC · 5.1 声道</string>
+    <string name="online_music_quality_summary_master">FLAC · 24bit/192kHz</string>
+    <string name="online_music_quality_hint">播放时会优先请求所选音质，不可用时自动降级。</string>
     <string name="cloud_music_entry_mine">我的</string>
     <string name="cloud_music_entry_recommend">推荐</string>
     <string name="cloud_music_entry_radio">电台</string>

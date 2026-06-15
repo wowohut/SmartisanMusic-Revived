@@ -41,7 +41,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -49,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.ActivityOptionsCompat
 import com.smartisanos.music.R
 import com.smartisanos.music.data.online.NeteaseAuthState
 import com.smartisanos.music.data.online.NeteaseAuthStore
@@ -66,7 +66,6 @@ import com.smartisanos.music.data.settings.parseArtistSeparatorInput
 import com.smartisanos.music.ui.online.NeteaseWebLoginActivity
 import com.smartisanos.music.ui.shell.titlebar.LegacyPortSmartisanTitleBar
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import smartisanos.app.MenuDialog
 import smartisanos.widget.ShadowDrawable
@@ -94,7 +93,6 @@ internal fun LegacyPortSettingsPage(
 ) {
     val context = LocalContext.current
     val appContext = context.applicationContext
-    val scope = rememberCoroutineScope()
     val authStore = remember(appContext) {
         NeteaseAuthStore(appContext)
     }
@@ -103,13 +101,11 @@ internal fun LegacyPortSettingsPage(
     }
     var editingArtistSeparators by remember { mutableStateOf(false) }
     var artistSeparatorsInitialValues by remember { mutableStateOf(emptySet<String>()) }
-    var audioFxPageVisible by rememberSaveable { mutableStateOf(false) }
+    var secondaryPage by rememberSaveable { mutableStateOf<LegacySettingsSecondaryPage?>(null) }
     var neteaseAuthState by remember { mutableStateOf(authStore.load()) }
     var neteaseAuthRevision by remember { mutableStateOf(0) }
     var logoutConfirmVisible by remember { mutableStateOf(false) }
-    var playbackQualityDialogVisible by remember { mutableStateOf(false) }
     val latestOnArtistSeparatorsChange by rememberUpdatedState(onArtistSeparatorsChange)
-    val latestOnNeteasePlaybackQualityChange by rememberUpdatedState(onNeteasePlaybackQualityChange)
     val loginLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -144,16 +140,15 @@ internal fun LegacyPortSettingsPage(
         }
     }
 
-    val audioFxPredictiveBackState = rememberLegacyPortPredictiveBackState()
-    val secondaryPage = if (audioFxPageVisible) LegacySettingsSecondaryPage.AudioFx else null
+    val settingsPredictiveBackState = rememberLegacyPortPredictiveBackState()
 
     LegacyPortPredictiveBackHandler(
-        enabled = active && audioFxPageVisible,
-        state = audioFxPredictiveBackState,
+        enabled = active && secondaryPage != null,
+        state = settingsPredictiveBackState,
     ) {
-        audioFxPageVisible = false
+        secondaryPage = null
     }
-    BackHandler(enabled = active && !audioFxPageVisible) {
+    BackHandler(enabled = active && secondaryPage == null) {
         onClose()
     }
 
@@ -162,10 +157,10 @@ internal fun LegacyPortSettingsPage(
         modifier = modifier
             .fillMaxSize()
             .background(ComposeColor.White),
-        label = "legacy settings audio fx page stack",
-        predictiveBackProgress = audioFxPredictiveBackState.progress,
-        predictiveBackExitConsumed = audioFxPredictiveBackState.exitConsumed,
-        onPredictiveBackExitConsumedReset = audioFxPredictiveBackState::reset,
+        label = "legacy settings page stack",
+        predictiveBackProgress = settingsPredictiveBackState.progress,
+        predictiveBackExitConsumed = settingsPredictiveBackState.exitConsumed,
+        onPredictiveBackExitConsumedReset = settingsPredictiveBackState::reset,
         primaryContent = {
             LegacySettingsRootPage(
                 active = active,
@@ -178,17 +173,24 @@ internal fun LegacyPortSettingsPage(
                     if (neteaseAuthState.isLoggedIn) {
                         logoutConfirmVisible = true
                     } else {
-                        loginLauncher.launch(NeteaseWebLoginActivity.createIntent(context))
+                        loginLauncher.launch(
+                            NeteaseWebLoginActivity.createIntent(context),
+                            ActivityOptionsCompat.makeCustomAnimation(
+                                context,
+                                R.anim.legacy_activity_slide_in_from_right,
+                                R.anim.legacy_activity_slide_out_to_left,
+                            ),
+                        )
                     }
                 },
                 onNeteasePlaybackQualityClick = {
-                    playbackQualityDialogVisible = true
+                    secondaryPage = LegacySettingsSecondaryPage.OnlineQuality
                 },
                 onScratchEnabledChange = onScratchEnabledChange,
                 onHidePlayerAxisEnabledChange = onHidePlayerAxisEnabledChange,
                 onPopcornSoundEnabledChange = onPopcornSoundEnabledChange,
                 onAudioFxClick = {
-                    audioFxPageVisible = true
+                    secondaryPage = LegacySettingsSecondaryPage.AudioFx
                 },
                 onArtistSeparatorsClick = {
                     artistSeparatorsInitialValues = artistSettings.separators
@@ -203,11 +205,20 @@ internal fun LegacyPortSettingsPage(
                     active = active,
                     playbackSettings = playbackSettings,
                     onClose = {
-                        audioFxPageVisible = false
+                        secondaryPage = null
                     },
                     onAudioFxEnabledChange = onAudioFxEnabledChange,
                     onAudioFxPresetChange = onAudioFxPresetChange,
                     onAudioFxCustomGainDbPointsChange = onAudioFxCustomGainDbPointsChange,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                LegacySettingsSecondaryPage.OnlineQuality -> LegacyOnlineQualitySettingsPage(
+                    active = active,
+                    onlineMusicSettings = onlineMusicSettings,
+                    onClose = {
+                        secondaryPage = null
+                    },
+                    onNeteasePlaybackQualityChange = onNeteasePlaybackQualityChange,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -228,31 +239,6 @@ internal fun LegacyPortSettingsPage(
             Toast.makeText(context, R.string.netease_logout_success, Toast.LENGTH_SHORT).show()
         },
     )
-
-    if (playbackQualityDialogVisible) {
-        val selectedQuality = onlineMusicSettings.neteasePlaybackQuality
-        val title = context.getString(R.string.online_music_play_quality)
-        DisposableEffect(selectedQuality, title) {
-            val dialog = LegacyOnlineQualityDialog(
-                context = context,
-                title = title,
-                selectedQuality = selectedQuality,
-                onDismiss = {
-                    playbackQualityDialogVisible = false
-                },
-                onSelect = { quality ->
-                    playbackQualityDialogVisible = false
-                    scope.launch {
-                        latestOnNeteasePlaybackQualityChange(quality)
-                    }
-                },
-            )
-            dialog.show()
-            onDispose {
-                dialog.dismissIfShowing()
-            }
-        }
-    }
 
     if (editingArtistSeparators) {
         DisposableEffect(artistSeparatorsInitialValues) {
@@ -411,6 +397,47 @@ private fun LegacyAudioFxSettingsPage(
     }
 }
 
+@Composable
+private fun LegacyOnlineQualitySettingsPage(
+    active: Boolean,
+    onlineMusicSettings: OnlineMusicSettings,
+    onClose: () -> Unit,
+    onNeteasePlaybackQualityChange: (NeteaseAudioQuality) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(ComposeColor.White),
+    ) {
+        LegacyPortSmartisanTitleBar(
+            modifier = Modifier.fillMaxWidth(),
+            showShadow = true,
+        ) { titleBar ->
+            titleBar.setupLegacySettingsTitleBar(
+                titleRes = R.string.online_music_play_quality,
+                onClose = onClose,
+                closeAffordance = LegacySettingsCloseAffordance.Done,
+            )
+        }
+        AndroidView(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            factory = { context ->
+                LegacyOnlineQualityContentView(context)
+            },
+            update = { view ->
+                view.visibility = if (active) View.VISIBLE else View.INVISIBLE
+                view.bind(
+                    selectedQuality = onlineMusicSettings.neteasePlaybackQuality,
+                    onQualityChange = onNeteasePlaybackQualityChange,
+                )
+            },
+        )
+    }
+}
+
 private enum class LegacySettingsRowShape(
     val backgroundRes: Int,
     val shadowRes: Int,
@@ -423,6 +450,7 @@ private enum class LegacySettingsRowShape(
 
 private enum class LegacySettingsSecondaryPage {
     AudioFx,
+    OnlineQuality,
 }
 
 private val AudioFxFrequencyLabels = listOf("60", "230", "910", "4k", "14k")
@@ -480,6 +508,21 @@ private fun NeteaseAudioQuality.label(context: Context): String {
             NeteaseAudioQuality.HdSurround -> R.string.online_music_quality_hd_surround
             NeteaseAudioQuality.Surround -> R.string.online_music_quality_surround
             NeteaseAudioQuality.Master -> R.string.online_music_quality_master
+        },
+    )
+}
+
+private fun NeteaseAudioQuality.summary(context: Context): String {
+    return context.getString(
+        when (this) {
+            NeteaseAudioQuality.Standard -> R.string.online_music_quality_summary_standard
+            NeteaseAudioQuality.Higher -> R.string.online_music_quality_summary_higher
+            NeteaseAudioQuality.ExHigh -> R.string.online_music_quality_summary_exhigh
+            NeteaseAudioQuality.Lossless -> R.string.online_music_quality_summary_lossless
+            NeteaseAudioQuality.HiRes -> R.string.online_music_quality_summary_hires
+            NeteaseAudioQuality.HdSurround -> R.string.online_music_quality_summary_hd_surround
+            NeteaseAudioQuality.Surround -> R.string.online_music_quality_summary_surround
+            NeteaseAudioQuality.Master -> R.string.online_music_quality_summary_master
         },
     )
 }
@@ -663,6 +706,226 @@ private class LegacySettingsContentView(context: Context) : ScrollView(context) 
             insetLeftRight = shadowPadding.left,
             insetTopBottom = shadowPadding.top,
         )
+    }
+}
+
+private class LegacyOnlineQualityContentView(context: Context) : ScrollView(context) {
+    private var selectedQuality = NeteaseAudioQuality.ExHigh
+    private var onQualityChange: ((NeteaseAudioQuality) -> Unit)? = null
+    private val content = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        clipChildren = false
+        clipToPadding = false
+    }
+    private val rows = NeteaseAudioQuality.entries.map { quality ->
+        quality to LegacyOnlineQualityRow(context, quality) {
+            selectQuality(quality)
+        }
+    }
+
+    init {
+        setBackgroundResource(R.drawable.account_background)
+        isFillViewport = true
+        isVerticalScrollBarEnabled = false
+        overScrollMode = OVER_SCROLL_ALWAYS
+        clipChildren = false
+        clipToPadding = false
+        addView(
+            content,
+            LayoutParams(
+                LayoutParams.MATCH_PARENT,
+                LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        content.addView(gapView(context))
+        content.addView(sectionTitleView(context, R.string.online_music_play_quality))
+        content.addView(
+            settingsGroup(
+                context,
+                *rows.mapIndexed { index, pair ->
+                    pair.second to when (index) {
+                        0 -> LegacySettingsRowShape.Top
+                        rows.lastIndex -> LegacySettingsRowShape.Bottom
+                        else -> LegacySettingsRowShape.Middle
+                    }
+                }.toTypedArray(),
+            ),
+        )
+        content.addView(hintView(context))
+        content.addView(gapView(context))
+    }
+
+    fun bind(
+        selectedQuality: NeteaseAudioQuality,
+        onQualityChange: (NeteaseAudioQuality) -> Unit,
+    ) {
+        this.selectedQuality = selectedQuality
+        this.onQualityChange = onQualityChange
+        renderRows()
+    }
+
+    private fun selectQuality(quality: NeteaseAudioQuality) {
+        if (selectedQuality == quality) {
+            return
+        }
+        selectedQuality = quality
+        renderRows()
+        onQualityChange?.invoke(quality)
+    }
+
+    private fun renderRows() {
+        rows.forEach { (quality, row) ->
+            row.bind(selected = quality == selectedQuality)
+        }
+    }
+
+    private fun gapView(context: Context): View {
+        return View(context).apply {
+            setBackgroundColor(Color.TRANSPARENT)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                resources.getDimensionPixelSize(R.dimen.list_item_vertical_gap),
+            )
+        }
+    }
+
+    private fun sectionTitleView(context: Context, textRes: Int): TextView {
+        val margin = context.resources.getDimensionPixelSize(R.dimen.list_item_left_right_margin)
+        return TextView(context).apply {
+            setText(textRes)
+            setTextColor(context.getColor(R.color.setting_item_summary_text_color))
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.settings_item_tips_text_size))
+            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+            setPadding(context.dpPx(18), 0, context.dpPx(18), context.dpPx(7))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                leftMargin = margin
+                rightMargin = margin
+            }
+        }
+    }
+
+    private fun hintView(context: Context): TextView {
+        val margin = context.resources.getDimensionPixelSize(R.dimen.list_item_left_right_margin)
+        return TextView(context).apply {
+            setText(R.string.online_music_quality_hint)
+            setTextColor(context.getColor(R.color.setting_item_summary_text_color))
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.settings_item_tips_text_size))
+            setPadding(context.dpPx(54), context.dpPx(10), context.dpPx(18), 0)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                leftMargin = margin
+                rightMargin = margin
+            }
+        }
+    }
+
+    private fun settingsGroup(
+        context: Context,
+        vararg rows: Pair<View, LegacySettingsRowShape>,
+    ): LinearLayout {
+        return LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            clipChildren = false
+            clipToPadding = false
+            rows.forEach { (row, shape) ->
+                row.applyLegacySettingsBackground(shape)
+                addView(row, rowLayoutParams(context))
+            }
+        }
+    }
+
+    private fun rowLayoutParams(context: Context): LinearLayout.LayoutParams {
+        val margin = context.resources.getDimensionPixelSize(R.dimen.list_item_left_right_margin)
+        return LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            context.dpPx(72),
+        ).apply {
+            leftMargin = margin
+            rightMargin = margin
+        }
+    }
+}
+
+private class LegacyOnlineQualityRow(
+    context: Context,
+    private val quality: NeteaseAudioQuality,
+    onClick: () -> Unit,
+) : RelativeLayout(context) {
+    private val titleView = TextView(context).apply {
+        id = View.generateViewId()
+        gravity = Gravity.CENTER_VERTICAL
+        setSingleLine(true)
+        text = quality.label(context)
+        setTextColor(context.getColorStateList(R.color.setting_item_text_colorlist))
+        setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.primary_text_size))
+        setDuplicateParentStateEnabled(true)
+    }
+    private val summaryView = TextView(context).apply {
+        id = View.generateViewId()
+        gravity = Gravity.CENTER_VERTICAL
+        setSingleLine(true)
+        text = quality.summary(context)
+        setTextColor(context.getColorStateList(R.color.setting_item_summary_text_colorlist))
+        setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.settings_item_tips_text_size))
+        setDuplicateParentStateEnabled(true)
+    }
+    private val selectedView = ImageView(context).apply {
+        id = View.generateViewId()
+        scaleType = ImageView.ScaleType.CENTER_INSIDE
+        setDuplicateParentStateEnabled(true)
+    }
+
+    init {
+        isClickable = true
+        isFocusable = true
+        setOnClickListener {
+            onClick()
+        }
+        addView(
+            selectedView,
+            LayoutParams(context.dpPx(36), context.dpPx(36)).apply {
+                addRule(ALIGN_PARENT_RIGHT)
+                addRule(CENTER_VERTICAL)
+                rightMargin = context.dpPx(14)
+            },
+        )
+        val textColumn = LinearLayout(context).apply {
+            id = View.generateViewId()
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(
+                titleView,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+            addView(
+                summaryView,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+        }
+        addView(
+            textColumn,
+            LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+                addRule(CENTER_VERTICAL)
+                addRule(LEFT_OF, selectedView.id)
+                leftMargin = context.dpPx(18)
+                rightMargin = context.dpPx(10)
+            },
+        )
+    }
+
+    fun bind(selected: Boolean) {
+        selectedView.setImageResource(if (selected) R.drawable.selected else R.drawable.unselected)
     }
 }
 
@@ -1344,143 +1607,6 @@ private fun LegacyOnlineLogoutDialog(
             if (dialog.isShowing) {
                 dialog.dismiss()
             }
-        }
-    }
-}
-
-private class LegacyOnlineQualityDialog(
-    private val context: Context,
-    title: String,
-    selectedQuality: NeteaseAudioQuality,
-    private val onDismiss: () -> Unit,
-    private val onSelect: (NeteaseAudioQuality) -> Unit,
-) {
-    private val dialog = Dialog(context, R.style.MmsDialogTheme)
-
-    init {
-        val root = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundResource(R.drawable.revone_global_dialog_shape_background)
-        }
-        dialog.requestWindowFeature(1)
-        dialog.setContentView(root)
-        dialog.setCanceledOnTouchOutside(true)
-        dialog.setOnCancelListener {
-            onDismiss()
-        }
-
-        root.addView(
-            TextView(context).apply {
-                text = title
-                gravity = Gravity.CENTER
-                setTextColor(context.getColor(R.color.status_bar_color_dialog))
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-                typeface = Typeface.DEFAULT_BOLD
-            },
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                context.resources.getDimensionPixelSize(R.dimen.revone_dialog_button_height),
-            ),
-        )
-
-        val content = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundResource(R.drawable.revone_global_dialog_message_background)
-        }
-        NeteaseAudioQuality.entries.forEach { quality ->
-            content.addView(
-                qualityRow(quality, selectedQuality == quality),
-                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, context.dpPx(48)),
-            )
-        }
-        root.addView(content, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-
-        root.addView(
-            dialogActionButton(context.getString(android.R.string.cancel)).apply {
-                setOnClickListener {
-                    dialog.dismiss()
-                    onDismiss()
-                }
-            },
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                context.resources.getDimensionPixelSize(R.dimen.revone_dialog_button_height),
-            ),
-        )
-    }
-
-    fun show() {
-        dialog.show()
-        dialog.window?.apply {
-            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-            setDimAmount(0.54f)
-            addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-            setLayout(context.resources.getDimensionPixelSize(R.dimen.revone_global_dialog_content_width), WindowManager.LayoutParams.WRAP_CONTENT)
-        }
-    }
-
-    fun dismissIfShowing() {
-        if (dialog.isShowing) {
-            dialog.dismiss()
-        }
-    }
-
-    private fun qualityRow(
-        quality: NeteaseAudioQuality,
-        selected: Boolean,
-    ): RelativeLayout {
-        return RelativeLayout(context).apply {
-            isClickable = true
-            isFocusable = true
-            setOnClickListener {
-                dialog.dismiss()
-                onSelect(quality)
-            }
-            val selectedView = ImageView(context).apply {
-                id = View.generateViewId()
-                visibility = if (selected) View.VISIBLE else View.INVISIBLE
-                setImageResource(R.drawable.selector_radio_choice)
-                scaleType = ImageView.ScaleType.CENTER_INSIDE
-            }
-            addView(
-                selectedView,
-                RelativeLayout.LayoutParams(context.dpPx(28), context.dpPx(28)).apply {
-                    addRule(RelativeLayout.ALIGN_PARENT_RIGHT)
-                    addRule(RelativeLayout.CENTER_VERTICAL)
-                    rightMargin = context.dpPx(16)
-                },
-            )
-            addView(
-                TextView(context).apply {
-                    gravity = Gravity.CENTER_VERTICAL
-                    text = quality.label(context)
-                    setTextColor(context.getColorStateList(R.color.setting_item_text_colorlist))
-                    setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.primary_text_size))
-                    setDuplicateParentStateEnabled(true)
-                },
-                RelativeLayout.LayoutParams(
-                    RelativeLayout.LayoutParams.MATCH_PARENT,
-                    RelativeLayout.LayoutParams.WRAP_CONTENT,
-                ).apply {
-                    addRule(RelativeLayout.CENTER_VERTICAL)
-                    addRule(RelativeLayout.LEFT_OF, selectedView.id)
-                    leftMargin = context.dpPx(30)
-                    rightMargin = context.dpPx(12)
-                },
-            )
-        }
-    }
-
-    private fun dialogActionButton(text: String): TextView {
-        return TextView(context).apply {
-            gravity = Gravity.CENTER
-            this.text = text
-            setTextColor(context.getColorStateList(R.drawable.btn_text_color_selector))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
-            typeface = Typeface.DEFAULT_BOLD
-            isClickable = true
-            isFocusable = true
-            setBackgroundResource(R.drawable.revone_dialog_button_bg_selector)
         }
     }
 }

@@ -67,6 +67,7 @@ import com.smartisanos.music.playback.replaceQueueAndPlayShuffled
 import com.smartisanos.music.ui.components.hasAudioPermission
 import com.smartisanos.music.ui.shell.titlebar.LegacyPortSmartisanTitleBar
 import com.smartisanos.music.ui.shell.titlebar.LegacyPortTitleBarShadow
+import com.smartisanos.music.ui.shell.titlebar.LegacyPortTitleBarTransition
 import com.smartisanos.music.ui.folder.DirectoryEntry
 import com.smartisanos.music.ui.folder.buildDirectoryEntries
 import com.smartisanos.music.ui.folder.filterDirectoryEntriesForDisplay
@@ -201,7 +202,7 @@ internal fun LegacyPortFolderPage(
         Column(
             modifier = Modifier.fillMaxSize(),
         ) {
-            LegacyPortPageStackTransition(
+            LegacyPortTitleBarTransition(
                 secondaryKey = target,
                 modifier = Modifier
                     .fillMaxWidth()

@@ -16,6 +16,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
@@ -55,6 +56,8 @@ internal class NeteaseWebLoginActivity : ComponentActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.WHITE)
+            clipChildren = false
+            clipToPadding = false
         }
         val statusBarSpacer = View(this).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -63,7 +66,7 @@ internal class NeteaseWebLoginActivity : ComponentActivity() {
             )
             setBackgroundColor(Color.WHITE)
         }
-        val toolbar = createToolbar()
+        val toolbar = createToolbarContainer()
         webView = WebView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -116,30 +119,70 @@ internal class NeteaseWebLoginActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private fun createToolbar(): TitleBar {
-        return TitleBar(this).apply {
+    private fun createToolbarContainer(): FrameLayout {
+        val titleBarHeight = resources.getDimensionPixelSize(R.dimen.title_bar_height)
+        val shadowHeight = resources.getDimensionPixelSize(R.dimen.title_bar_shadow_height)
+        return FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                resources.getDimensionPixelSize(R.dimen.title_bar_height),
+                titleBarHeight,
             )
-            setCenterText(R.string.netease_login_title)
-            setShadowVisible(true)
-            addLeftImageView(R.drawable.standard_icon_back_selector).apply {
-                contentDescription = getString(R.string.back)
-                setOnClickListener { handleBackNavigation() }
-            }
-            addRightImageView(R.drawable.standard_icon_complete_selector).apply {
-                contentDescription = getString(R.string.done)
-                setOnClickListener { returnCookiesIfLoggedIn(showError = true) }
-            }
+            clipChildren = false
+            clipToPadding = false
+            setBackgroundColor(Color.WHITE)
+            addView(
+                TitleBar(context).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                    setCenterText(R.string.netease_login_title)
+                    setShadowVisible(false)
+                    addLeftImageView(R.drawable.standard_icon_back_selector).apply {
+                        contentDescription = getString(R.string.back)
+                        setOnClickListener { handleBackNavigation() }
+                    }
+                    addRightImageView(R.drawable.standard_icon_complete_selector).apply {
+                        contentDescription = getString(R.string.done)
+                        setOnClickListener { returnCookiesIfLoggedIn(showError = true) }
+                    }
+                },
+            )
+            addView(
+                View(context).apply {
+                    setBackgroundResource(R.drawable.title_bar_shadow)
+                    translationY = shadowHeight.toFloat()
+                },
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    shadowHeight,
+                    android.view.Gravity.BOTTOM,
+                ),
+            )
         }
+    }
+
+    private fun finishWithPageTransition() {
+        finish()
+        overridePendingTransition(
+            R.anim.legacy_activity_slide_in_from_left,
+            R.anim.legacy_activity_slide_out_to_right,
+        )
+    }
+
+    private fun finishAfterLogin() {
+        finish()
+        overridePendingTransition(
+            R.anim.legacy_activity_slide_in_from_left,
+            R.anim.legacy_activity_slide_out_to_right,
+        )
     }
 
     private fun handleBackNavigation() {
         if (this::webView.isInitialized && webView.canGoBack()) {
             webView.goBack()
         } else {
-            finish()
+            finishWithPageTransition()
         }
     }
 
@@ -148,14 +191,13 @@ internal class NeteaseWebLoginActivity : ComponentActivity() {
             val protectedInsets = windowInsets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
             )
-            val gestureInsets = windowInsets.getInsets(WindowInsetsCompat.Type.systemGestures())
             statusBarSpacer.updateLayoutParams<LinearLayout.LayoutParams> {
                 height = protectedInsets.top
             }
             view.setPadding(
-                maxOf(protectedInsets.left, gestureInsets.left),
+                protectedInsets.left,
                 0,
-                maxOf(protectedInsets.right, gestureInsets.right),
+                protectedInsets.right,
                 protectedInsets.bottom,
             )
             windowInsets
@@ -182,7 +224,7 @@ internal class NeteaseWebLoginActivity : ComponentActivity() {
             Activity.RESULT_OK,
             Intent().putExtra(ExtraCookieJson, cookieJson),
         )
-        finish()
+        finishAfterLogin()
         return true
     }
 

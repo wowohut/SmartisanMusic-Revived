@@ -160,6 +160,15 @@
     <string name="online_music_quality_hd_surround">HD Surround</string>
     <string name="online_music_quality_surround">Spatial Surround</string>
     <string name="online_music_quality_master">Master</string>
+    <string name="online_music_quality_summary_standard">MP3 · 128K</string>
+    <string name="online_music_quality_summary_higher">MP3 · 192K</string>
+    <string name="online_music_quality_summary_exhigh">MP3 · 320K</string>
+    <string name="online_music_quality_summary_lossless">FLAC · About 1000K</string>
+    <string name="online_music_quality_summary_hires">FLAC · About 1600K+</string>
+    <string name="online_music_quality_summary_hd_surround">FLAC · 24bit/96kHz</string>
+    <string name="online_music_quality_summary_surround">FLAC · 5.1 channels</string>
+    <string name="online_music_quality_summary_master">FLAC · 24bit/192kHz</string>
+    <string name="online_music_quality_hint">Playback requests the selected quality first and automatically falls back when unavailable.</string>
     <string name="cloud_music_entry_mine">Mine</string>
     <string name="cloud_music_entry_recommend">Recommend</string>
     <string name="cloud_music_entry_radio">Radio</string>

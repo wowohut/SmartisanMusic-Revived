@@ -94,6 +94,7 @@ import com.smartisanos.music.ui.shell.tabs.LegacyPortBottomBar
 import com.smartisanos.music.ui.shell.tabs.LegacyPortTabContent
 import com.smartisanos.music.ui.shell.titlebar.LegacyPortTitleBarShadow
 import com.smartisanos.music.ui.shell.titlebar.LegacyPortTitleBar
+import com.smartisanos.music.ui.shell.titlebar.LegacyPortTitleBarTransition
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -727,7 +728,7 @@ private fun LegacyPortMainShellContent(
             if (currentDestination == MusicDestination.Playlist || currentDestination == MusicDestination.More) {
                 // 播放列表页和更多二级页需要复刻原版自身的标题栏、详情栈和加歌/文件夹过渡。
             } else if (currentDestination == MusicDestination.Album) {
-                LegacyPortPageStackTransition(
+                LegacyPortTitleBarTransition(
                     secondaryKey = selectedAlbumTitle,
                     modifier = Modifier
                         .fillMaxWidth()

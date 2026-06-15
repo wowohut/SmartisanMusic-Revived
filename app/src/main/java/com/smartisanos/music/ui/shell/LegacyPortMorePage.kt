@@ -32,7 +32,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -155,90 +154,92 @@ internal fun LegacyPortMorePage(
         }
     }
 
-    LegacyPortPageStackTransition(
-        secondaryKey = secondaryTarget,
-        modifier = modifier.fillMaxSize(),
-        label = "legacy more page stack",
-        axisForKey = { target ->
-            when (target) {
-                LegacyMoreSecondaryTarget.LovedSongs -> LegacyPortPageStackAxis.Horizontal
-                LegacyMoreSecondaryTarget.Folder -> LegacyPortPageStackAxis.Horizontal
-                LegacyMoreSecondaryTarget.Settings -> LegacyPortPageStackAxis.VerticalPush
-            }
-        },
-        predictiveBackProgress = secondaryPredictiveBackState.progress,
-        predictiveBackExitConsumed = secondaryPredictiveBackState.exitConsumed,
-        onPredictiveBackExitConsumedReset = secondaryPredictiveBackState::reset,
-        primaryContent = {
-            LegacyMoreRootPage(
-                active = active,
-                onSettingsClick = {
-                    onSettingsPageActiveChanged(true)
-                    secondaryTarget = LegacyMoreSecondaryTarget.Settings
-                },
-                onFolderClick = {
-                    secondaryTarget = LegacyMoreSecondaryTarget.Folder
-                },
-                onLovedSongsClick = {
-                    onLibraryNeeded()
-                    secondaryTarget = LegacyMoreSecondaryTarget.LovedSongs
-                },
-                onSearchClick = onSearchClick,
-                modifier = Modifier.fillMaxSize(),
-            )
-        },
-        secondaryContent = { target ->
-            when (target) {
-                LegacyMoreSecondaryTarget.LovedSongs -> LegacyPortLovedSongsPage(
+    Box(modifier = modifier.fillMaxSize()) {
+        LegacyPortPageStackTransition(
+            secondaryKey = secondaryTarget,
+            modifier = Modifier.fillMaxSize(),
+            label = "legacy more page stack",
+            axisForKey = { target ->
+                when (target) {
+                    LegacyMoreSecondaryTarget.LovedSongs -> LegacyPortPageStackAxis.Horizontal
+                    LegacyMoreSecondaryTarget.Folder -> LegacyPortPageStackAxis.Horizontal
+                    LegacyMoreSecondaryTarget.Settings -> LegacyPortPageStackAxis.VerticalPush
+                }
+            },
+            predictiveBackProgress = secondaryPredictiveBackState.progress,
+            predictiveBackExitConsumed = secondaryPredictiveBackState.exitConsumed,
+            onPredictiveBackExitConsumedReset = secondaryPredictiveBackState::reset,
+            primaryContent = {
+                LegacyMoreRootPage(
                     active = active,
-                    mediaItems = mediaItems,
-                    favoriteRecords = favoriteRecords,
-                    hiddenMediaIds = hiddenMediaIds,
-                    libraryLoaded = libraryLoaded,
-                    onClose = {
-                        secondaryTarget = null
+                    onSettingsClick = {
+                        onSettingsPageActiveChanged(true)
+                        secondaryTarget = LegacyMoreSecondaryTarget.Settings
                     },
-                    closePredictiveBackState = secondaryPredictiveBackState,
-                    onTrackMoreClick = onLovedSongsTrackMoreClick,
-                    onRemoveFavoriteMediaIds = onRemoveFavoriteMediaIds,
+                    onFolderClick = {
+                        secondaryTarget = LegacyMoreSecondaryTarget.Folder
+                    },
+                    onLovedSongsClick = {
+                        onLibraryNeeded()
+                        secondaryTarget = LegacyMoreSecondaryTarget.LovedSongs
+                    },
+                    onSearchClick = onSearchClick,
                     modifier = Modifier.fillMaxSize(),
                 )
-                LegacyMoreSecondaryTarget.Folder -> LegacyPortFolderPage(
-                    active = active,
-                    libraryRefreshVersion = libraryRefreshVersion,
-                    libraryRefreshing = libraryRefreshing,
-                    onClose = {
-                        secondaryTarget = null
-                    },
-                    closePredictiveBackState = secondaryPredictiveBackState,
-                    onRefreshLibrary = onRefreshLibrary,
-                    onMediaIdsHidden = onMediaIdsHidden,
-                    onRequestDeleteMediaIds = onRequestDeleteMediaIds,
-                    onTrackMoreClick = onFolderTrackMoreClick,
-                    modifier = Modifier.fillMaxSize(),
-                )
-                LegacyMoreSecondaryTarget.Settings -> LegacyPortSettingsPage(
-                    active = active,
-                    playbackSettings = playbackSettings,
-                    artistSettings = artistSettings,
-                    onlineMusicSettings = onlineMusicSettings,
-                    onClose = {
-                        secondaryTarget = null
-                    },
-                    onScratchEnabledChange = onScratchEnabledChange,
-                    onHidePlayerAxisEnabledChange = onHidePlayerAxisEnabledChange,
-                    onPopcornSoundEnabledChange = onPopcornSoundEnabledChange,
-                    onAudioFxEnabledChange = onAudioFxEnabledChange,
-                    onAudioFxPresetChange = onAudioFxPresetChange,
-                    onAudioFxCustomGainDbPointsChange = onAudioFxCustomGainDbPointsChange,
-                    onArtistSeparatorsChange = onArtistSeparatorsChange,
-                    onNeteasePlaybackQualityChange = onNeteasePlaybackQualityChange,
-                    onNeteaseAuthChanged = onNeteaseAuthChanged,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        },
-    )
+            },
+            secondaryContent = { target ->
+                when (target) {
+                    LegacyMoreSecondaryTarget.LovedSongs -> LegacyPortLovedSongsPage(
+                        active = active,
+                        mediaItems = mediaItems,
+                        favoriteRecords = favoriteRecords,
+                        hiddenMediaIds = hiddenMediaIds,
+                        libraryLoaded = libraryLoaded,
+                        onClose = {
+                            secondaryTarget = null
+                        },
+                        closePredictiveBackState = secondaryPredictiveBackState,
+                        onTrackMoreClick = onLovedSongsTrackMoreClick,
+                        onRemoveFavoriteMediaIds = onRemoveFavoriteMediaIds,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    LegacyMoreSecondaryTarget.Folder -> LegacyPortFolderPage(
+                        active = active,
+                        libraryRefreshVersion = libraryRefreshVersion,
+                        libraryRefreshing = libraryRefreshing,
+                        onClose = {
+                            secondaryTarget = null
+                        },
+                        closePredictiveBackState = secondaryPredictiveBackState,
+                        onRefreshLibrary = onRefreshLibrary,
+                        onMediaIdsHidden = onMediaIdsHidden,
+                        onRequestDeleteMediaIds = onRequestDeleteMediaIds,
+                        onTrackMoreClick = onFolderTrackMoreClick,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    LegacyMoreSecondaryTarget.Settings -> LegacyPortSettingsPage(
+                        active = active,
+                        playbackSettings = playbackSettings,
+                        artistSettings = artistSettings,
+                        onlineMusicSettings = onlineMusicSettings,
+                        onClose = {
+                            secondaryTarget = null
+                        },
+                        onScratchEnabledChange = onScratchEnabledChange,
+                        onHidePlayerAxisEnabledChange = onHidePlayerAxisEnabledChange,
+                        onPopcornSoundEnabledChange = onPopcornSoundEnabledChange,
+                        onAudioFxEnabledChange = onAudioFxEnabledChange,
+                        onAudioFxPresetChange = onAudioFxPresetChange,
+                        onAudioFxCustomGainDbPointsChange = onAudioFxCustomGainDbPointsChange,
+                        onArtistSeparatorsChange = onArtistSeparatorsChange,
+                        onNeteasePlaybackQualityChange = onNeteasePlaybackQualityChange,
+                        onNeteaseAuthChanged = onNeteaseAuthChanged,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            },
+        )
+    }
 }
 
 @Composable
