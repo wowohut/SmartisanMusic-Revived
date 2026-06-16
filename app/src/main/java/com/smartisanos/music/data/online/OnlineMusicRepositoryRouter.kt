@@ -58,6 +58,13 @@ internal class OnlineMusicRepositoryRouter(
         return track?.toMediaItem()
     }
 
+    suspend fun lyrics(identity: OnlineTrackIdentity): OnlineLyrics? {
+        return when (identity.source) {
+            OnlineMusicProvider.Netease.sourceId -> neteaseRepository.lyrics(identity)
+            else -> null
+        }
+    }
+
     suspend fun setTrackLiked(
         identity: OnlineTrackIdentity,
         liked: Boolean,

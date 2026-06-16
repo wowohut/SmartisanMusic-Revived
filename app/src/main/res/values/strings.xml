@@ -183,7 +183,6 @@
     <string name="cloud_music_section_search">搜索网易云音乐</string>
     <string name="cloud_music_section_search_results">搜索结果</string>
     <string name="cloud_music_section_search_artists">搜索艺术家</string>
-    <string name="cloud_music_section_hot_search">热搜榜</string>
     <string name="cloud_music_section_netease_picks">网易云精选</string>
     <string name="cloud_music_section_featured_playlists">热门推荐精选集</string>
     <string name="cloud_music_section_hot_charts">热歌人气榜</string>
@@ -199,10 +198,6 @@
     <string name="cloud_music_search_tab_all">综合</string>
     <string name="cloud_music_search_hint_artist">搜索网易云音乐艺术家</string>
     <string name="cloud_music_search_cancel">取消</string>
-    <string name="cloud_music_hot_search_loading">正在载入热搜</string>
-    <string name="cloud_music_hot_search_empty">暂无热搜</string>
-    <string name="cloud_music_hot_search_error">热搜暂时无法载入</string>
-    <string name="cloud_music_hot_search_heat_wan">%1$d 万</string>
     <string name="cloud_music_banner_fallback_title">网易云音乐</string>
     <string name="cloud_music_banner_fallback_subtitle">今日推荐与热门内容</string>
     <string name="cloud_music_artists_loading">正在载入艺术家</string>

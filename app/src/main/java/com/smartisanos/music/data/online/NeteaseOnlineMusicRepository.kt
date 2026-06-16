@@ -9,10 +9,13 @@ import com.smartisanos.music.data.settings.NeteaseAudioQuality
 import com.smartisanos.music.data.settings.OnlineMusicSettingsStore
 import com.smartisanos.music.data.settings.fallbackCandidates
 import com.smartisanos.music.playback.LocalAudioLibrary
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -29,6 +32,7 @@ private const val NeteaseFeaturedCacheTtlMs = 10 * 60 * 1000L
 private const val NeteaseDetailCacheTtlMs = 10 * 60 * 1000L
 private const val NeteaseAccountCacheTtlMs = 2 * 60 * 1000L
 private const val NeteaseSearchCacheTtlMs = 5 * 60 * 1000L
+private const val NeteaseLyricsCacheTtlMs = 7L * 24L * 60L * 60L * 1000L
 private const val SearchLimit = 30
 private const val ArtistSearchLimit = 30
 private const val AlbumSearchLimit = 30
@@ -69,21 +73,44 @@ private object NeteaseOnlineMemoryCache {
     private val entries = ConcurrentHashMap<String, CacheEntry>()
 
     @Suppress("UNCHECKED_CAST")
+    fun <T> getFreshValue(
+        key: String,
+        ttlMs: Long,
+        nowMs: Long = System.currentTimeMillis(),
+    ): FreshValue<T>? {
+        return entries[key]
+            ?.takeIf { entry -> nowMs - entry.loadedAtMs <= ttlMs }
+            ?.let { entry -> FreshValue(entry.unboxedValue() as T) }
+    }
+
+    fun <T : Any> getFresh(
+        key: String,
+        ttlMs: Long,
+        nowMs: Long = System.currentTimeMillis(),
+    ): T? {
+        return getFreshValue<T?>(key, ttlMs, nowMs)?.value
+    }
+
+    fun put(
+        key: String,
+        value: Any?,
+        loadedAtMs: Long = System.currentTimeMillis(),
+    ) {
+        entries[key] = CacheEntry(
+            value = value ?: NullValue,
+            loadedAtMs = loadedAtMs,
+        )
+    }
+
+    @Suppress("UNCHECKED_CAST")
     suspend fun <T> getOrLoad(
         key: String,
         ttlMs: Long,
         loader: suspend () -> T,
     ): T {
-        val now = System.currentTimeMillis()
-        entries[key]
-            ?.takeIf { entry -> now - entry.loadedAtMs <= ttlMs }
-            ?.let { entry -> return entry.unboxedValue() as T }
-
+        getFreshValue<T>(key, ttlMs)?.let { cached -> return cached.value }
         val value = loader()
-        entries[key] = CacheEntry(
-            value = value ?: NullValue,
-            loadedAtMs = System.currentTimeMillis(),
-        )
+        put(key, value)
         return value
     }
 
@@ -99,6 +126,10 @@ private object NeteaseOnlineMemoryCache {
             return if (value === NullValue) null else value
         }
     }
+
+    data class FreshValue<T>(
+        val value: T,
+    )
 
     private object NullValue
 }
@@ -200,9 +231,13 @@ internal class NeteaseOnlineMusicRepository(
         cookieProvider = { authStore?.getCookies().orEmpty() },
         playbackQualityProvider = playbackQualityProvider,
     ),
+    private val lyricsDiskCache: OnlineLyricsDiskCache? = null,
+    private val pageDiskCache: OnlinePageDiskCache? = null,
+    private val pageCacheRefreshScope: CoroutineScope? = null,
 ) : OnlineMusicProviderRepository {
 
     override val provider: OnlineMusicProvider = OnlineMusicProvider.Netease
+    private val refreshingPageCacheKeys = ConcurrentHashMap.newKeySet<String>()
 
     constructor(context: Context) : this(
         authStore = NeteaseAuthStore(context.applicationContext),
@@ -211,6 +246,9 @@ internal class NeteaseOnlineMusicRepository(
                 .readSettings()
                 .neteasePlaybackQuality
         },
+        lyricsDiskCache = OnlineLyricsDiskCache(context.applicationContext),
+        pageDiskCache = OnlinePageDiskCache(context.applicationContext),
+        pageCacheRefreshScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     )
 
     private fun cacheKey(namespace: String, vararg parts: Any?): String {
@@ -239,8 +277,148 @@ internal class NeteaseOnlineMusicRepository(
     }
 
     private fun invalidateAccountCaches() {
-        NeteaseOnlineMemoryCache.invalidate(cachePrefix("account"))
-        NeteaseOnlineMemoryCache.invalidate(cachePrefix("liked"))
+        invalidatePageCache(cachePrefix("account"))
+        invalidatePageCache(cachePrefix("liked"))
+    }
+
+    private fun invalidatePageCache(prefix: String) {
+        NeteaseOnlineMemoryCache.invalidate(prefix)
+        pageCacheRefreshScope?.launch {
+            pageDiskCache?.removePrefix(prefix)
+        }
+    }
+
+    private fun invalidatePlaylistTrackCaches(playlistId: String) {
+        invalidatePageCache(cacheKey("playlist:tracks", playlistId))
+        invalidatePageCache(cacheKey("account:playlist-tracks", playlistId))
+    }
+
+    private suspend fun <T : Any> cachedPage(
+        key: String,
+        ttlMs: Long,
+        codec: OnlinePageCacheCodec<T>,
+        loader: suspend () -> T,
+    ): T {
+        val nowMs = System.currentTimeMillis()
+        NeteaseOnlineMemoryCache.getFresh<T>(key, ttlMs, nowMs)?.let { value ->
+            return value
+        }
+        val diskEntry = pageDiskCache?.get(key, codec)
+        if (diskEntry != null) {
+            NeteaseOnlineMemoryCache.put(
+                key = key,
+                value = diskEntry.value,
+                loadedAtMs = diskEntry.cachedAtMs,
+            )
+            if (nowMs - diskEntry.cachedAtMs > ttlMs) {
+                refreshPageCacheInBackground(
+                    key = key,
+                    codec = codec,
+                    loader = loader,
+                )
+            }
+            return diskEntry.value
+        }
+        return loader().also { value ->
+            val loadedAtMs = System.currentTimeMillis()
+            NeteaseOnlineMemoryCache.put(key, value, loadedAtMs)
+            pageDiskCache?.put(
+                key = key,
+                value = value,
+                codec = codec,
+                cachedAtMs = loadedAtMs,
+            )
+        }
+    }
+
+    private suspend fun <T : Any> cachedNullablePage(
+        key: String,
+        ttlMs: Long,
+        codec: OnlinePageCacheCodec<T>,
+        loader: suspend () -> T?,
+    ): T? {
+        val nowMs = System.currentTimeMillis()
+        NeteaseOnlineMemoryCache.getFreshValue<T?>(key, ttlMs, nowMs)?.let { cached ->
+            return cached.value
+        }
+        val diskEntry = pageDiskCache?.get(key, codec)
+        if (diskEntry != null) {
+            NeteaseOnlineMemoryCache.put(
+                key = key,
+                value = diskEntry.value,
+                loadedAtMs = diskEntry.cachedAtMs,
+            )
+            if (nowMs - diskEntry.cachedAtMs > ttlMs) {
+                refreshNullablePageCacheInBackground(
+                    key = key,
+                    codec = codec,
+                    loader = loader,
+                )
+            }
+            return diskEntry.value
+        }
+        val value = loader()
+        NeteaseOnlineMemoryCache.put(key, value)
+        if (value != null) {
+            pageDiskCache?.put(
+                key = key,
+                value = value,
+                codec = codec,
+            )
+        }
+        return value
+    }
+
+    private fun <T : Any> refreshPageCacheInBackground(
+        key: String,
+        codec: OnlinePageCacheCodec<T>,
+        loader: suspend () -> T,
+    ) {
+        val scope = pageCacheRefreshScope ?: return
+        if (!refreshingPageCacheKeys.add(key)) {
+            return
+        }
+        scope.launch {
+            runCatching {
+                val value = loader()
+                val loadedAtMs = System.currentTimeMillis()
+                NeteaseOnlineMemoryCache.put(key, value, loadedAtMs)
+                pageDiskCache?.put(
+                    key = key,
+                    value = value,
+                    codec = codec,
+                    cachedAtMs = loadedAtMs,
+                )
+            }
+            refreshingPageCacheKeys.remove(key)
+        }
+    }
+
+    private fun <T : Any> refreshNullablePageCacheInBackground(
+        key: String,
+        codec: OnlinePageCacheCodec<T>,
+        loader: suspend () -> T?,
+    ) {
+        val scope = pageCacheRefreshScope ?: return
+        if (!refreshingPageCacheKeys.add(key)) {
+            return
+        }
+        scope.launch {
+            runCatching {
+                val value = loader()
+                val loadedAtMs = System.currentTimeMillis()
+                NeteaseOnlineMemoryCache.put(key, value, loadedAtMs)
+                if (value != null) {
+                    pageDiskCache?.put(
+                        key = key,
+                        value = value,
+                        codec = codec,
+                        cachedAtMs = loadedAtMs,
+                    )
+                }
+            }
+            refreshingPageCacheKeys.remove(key)
+        }
     }
 
     override suspend fun search(query: String): List<OnlineTrack> {
@@ -256,9 +434,10 @@ internal class NeteaseOnlineMusicRepository(
         if (normalizedQuery.isEmpty()) {
             return OnlineSearchResults(query = normalizedQuery)
         }
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("search:all", normalizedQuery),
             ttlMs = NeteaseSearchCacheTtlMs,
+            codec = OnlinePageCacheCodecs.SearchResults,
         ) {
             OnlineSearchResults(
                 query = normalizedQuery,
@@ -303,18 +482,20 @@ internal class NeteaseOnlineMusicRepository(
     }
 
     override suspend fun searchHotKeywords(): List<OnlineSearchHotKeyword> {
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("search:hot"),
             ttlMs = NeteaseSearchCacheTtlMs,
+            codec = OnlinePageCacheCodecs.HotKeywords,
         ) {
             client.getHotSearchKeywords(limit = HotSearchLimit)
         }
     }
 
     override suspend fun featuredTracks(): List<OnlineTrack> {
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("featured:tracks"),
             ttlMs = NeteaseFeaturedCacheTtlMs,
+            codec = OnlinePageCacheCodecs.Tracks,
         ) {
             currentUserDailyRecommendedTracks(limit = FeaturedLimit)
                 ?.takeIf(List<OnlineTrack>::isNotEmpty)
@@ -323,9 +504,10 @@ internal class NeteaseOnlineMusicRepository(
     }
 
     override suspend fun featuredHome(): OnlineMusicHome {
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("featured:home"),
             ttlMs = NeteaseFeaturedCacheTtlMs,
+            codec = OnlinePageCacheCodecs.MusicHome,
         ) {
             OnlineMusicHome(
                 tracks = runCatching {
@@ -348,72 +530,80 @@ internal class NeteaseOnlineMusicRepository(
     }
 
     override suspend fun featuredBanners(): List<OnlineBanner> {
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("featured:banners"),
             ttlMs = NeteaseFeaturedCacheTtlMs,
+            codec = OnlinePageCacheCodecs.Banners,
         ) {
             client.getBanners(limit = FeaturedBannerLimit)
         }
     }
 
     override suspend fun featuredPlaylists(): List<OnlinePlaylist> {
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("featured:playlists"),
             ttlMs = NeteaseFeaturedCacheTtlMs,
+            codec = OnlinePageCacheCodecs.Playlists,
         ) {
             client.getPersonalizedPlaylists(limit = FeaturedPlaylistLimit)
         }
     }
 
     override suspend fun featuredCharts(): List<OnlinePlaylist> {
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("featured:charts"),
             ttlMs = NeteaseFeaturedCacheTtlMs,
+            codec = OnlinePageCacheCodecs.Playlists,
         ) {
             client.getToplists(limit = FeaturedChartLimit)
         }
     }
 
     override suspend fun featuredAlbums(): List<OnlineAlbum> {
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("featured:albums"),
             ttlMs = NeteaseFeaturedCacheTtlMs,
+            codec = OnlinePageCacheCodecs.Albums,
         ) {
             client.getNewAlbums(limit = FeaturedAlbumLimit)
         }
     }
 
     override suspend fun featuredArtists(): List<OnlineArtist> {
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("featured:artists"),
             ttlMs = NeteaseFeaturedCacheTtlMs,
+            codec = OnlinePageCacheCodecs.Artists,
         ) {
             client.getTopArtists(limit = FeaturedArtistLimit)
         }
     }
 
     override suspend fun featuredRadioTracks(): List<OnlineTrack> {
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("radio:tracks:featured"),
             ttlMs = NeteaseFeaturedCacheTtlMs,
+            codec = OnlinePageCacheCodecs.Tracks,
         ) {
             client.getRecommendedRadioPrograms(limit = FeaturedRadioTrackLimit)
         }
     }
 
     override suspend fun featuredRadios(): List<OnlineRadio> {
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("radio:list:featured"),
             ttlMs = NeteaseFeaturedCacheTtlMs,
+            codec = OnlinePageCacheCodecs.Radios,
         ) {
             client.getRecommendedRadios(limit = FeaturedRadioLimit)
         }
     }
 
     override suspend fun featuredRadioHome(): OnlineRadioHome {
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("radio:home"),
             ttlMs = NeteaseFeaturedCacheTtlMs,
+            codec = OnlinePageCacheCodecs.RadioHome,
         ) {
             OnlineRadioHome(
                 tracks = runCatching {
@@ -513,9 +703,10 @@ internal class NeteaseOnlineMusicRepository(
         if (!state.isLoggedIn) {
             return null
         }
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedNullablePage(
             key = cacheKey("featured:daily", limit),
             ttlMs = NeteaseFeaturedCacheTtlMs,
+            codec = OnlinePageCacheCodecs.Tracks,
         ) {
             val result = runCatching {
                 client.getDailyRecommendedSongs(limit = limit)
@@ -566,6 +757,13 @@ internal class NeteaseOnlineMusicRepository(
                 liked = liked,
             )
         }.getOrDefault(NeteaseAccountActionResult(NeteaseAccountActionStatus.Failed))
+            .also { result ->
+                if (result.status == NeteaseAccountActionStatus.Success) {
+                    invalidateAccountCaches()
+                    invalidatePageCache(cachePrefix("playlist:tracks"))
+                    invalidatePageCache(cachePrefix("account:playlist-tracks"))
+                }
+            }
     }
 
     suspend fun addTracksToPlaylist(
@@ -589,6 +787,12 @@ internal class NeteaseOnlineMusicRepository(
                 operation = NeteasePlaylistTrackOperation.Add,
             )
         }.getOrDefault(NeteaseAccountActionResult(NeteaseAccountActionStatus.Failed))
+            .also { result ->
+                if (result.status == NeteaseAccountActionStatus.Success) {
+                    invalidateAccountCaches()
+                    invalidatePlaylistTrackCaches(normalizedPlaylistId)
+                }
+            }
     }
 
     suspend fun removeTracksFromPlaylist(
@@ -612,6 +816,12 @@ internal class NeteaseOnlineMusicRepository(
                 operation = NeteasePlaylistTrackOperation.Remove,
             )
         }.getOrDefault(NeteaseAccountActionResult(NeteaseAccountActionStatus.Failed))
+            .also { result ->
+                if (result.status == NeteaseAccountActionStatus.Success) {
+                    invalidateAccountCaches()
+                    invalidatePlaylistTrackCaches(normalizedPlaylistId)
+                }
+            }
     }
 
     suspend fun deletePlaylist(playlistId: String): NeteaseAccountActionResult {
@@ -624,6 +834,12 @@ internal class NeteaseOnlineMusicRepository(
         return runCatching {
             client.deletePlaylist(normalizedPlaylistId)
         }.getOrDefault(NeteaseAccountActionResult(NeteaseAccountActionStatus.Failed))
+            .also { result ->
+                if (result.status == NeteaseAccountActionStatus.Success) {
+                    invalidateAccountCaches()
+                    invalidatePlaylistTrackCaches(normalizedPlaylistId)
+                }
+            }
     }
 
     suspend fun createPlaylist(name: String): OnlineAccountPlaylistCreateResult {
@@ -644,9 +860,10 @@ internal class NeteaseOnlineMusicRepository(
             return null
         }
         val profile = currentUserProfile() ?: state.profile ?: return null
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("account:playlists"),
             ttlMs = NeteaseAccountCacheTtlMs,
+            codec = OnlinePageCacheCodecs.AccountPlaylists,
         ) {
             client.getUserPlaylists(
                 userId = profile.userId,
@@ -670,9 +887,10 @@ internal class NeteaseOnlineMusicRepository(
             return null
         }
         val profile = currentUserProfile() ?: state.profile ?: return null
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("account:albums"),
             ttlMs = NeteaseAccountCacheTtlMs,
+            codec = OnlinePageCacheCodecs.Albums,
         ) {
             client.getUserAlbums(
                 userId = profile.userId,
@@ -687,9 +905,10 @@ internal class NeteaseOnlineMusicRepository(
             return null
         }
         val profile = currentUserProfile() ?: state.profile ?: return null
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("account:radios"),
             ttlMs = NeteaseAccountCacheTtlMs,
+            codec = OnlinePageCacheCodecs.Radios,
         ) {
             client.getUserRadios(
                 userId = profile.userId,
@@ -699,9 +918,10 @@ internal class NeteaseOnlineMusicRepository(
     }
 
     override suspend fun accountLikedTrackIds(): Set<String>? {
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedNullablePage(
             key = cacheKey("liked:track-ids"),
             ttlMs = NeteaseAccountCacheTtlMs,
+            codec = OnlinePageCacheCodecs.TrackIds,
         ) {
             currentUserLikedTrackIds()
         }
@@ -718,10 +938,6 @@ internal class NeteaseOnlineMusicRepository(
             playlistId = playlist.playlistId,
             trackIds = trackIds,
         )
-        if (result.status == NeteaseAccountActionStatus.Success) {
-            invalidateAccountCaches()
-            NeteaseOnlineMemoryCache.invalidate(cacheKey("account:playlist-tracks", playlist.playlistId))
-        }
         return result
     }
 
@@ -736,10 +952,6 @@ internal class NeteaseOnlineMusicRepository(
             playlistId = playlist.playlistId,
             trackIds = trackIds,
         )
-        if (result.status == NeteaseAccountActionStatus.Success) {
-            invalidateAccountCaches()
-            NeteaseOnlineMemoryCache.invalidate(cacheKey("account:playlist-tracks", playlist.playlistId))
-        }
         return result
     }
 
@@ -750,10 +962,6 @@ internal class NeteaseOnlineMusicRepository(
             return NeteaseAccountActionResult(NeteaseAccountActionStatus.Failed)
         }
         val result = deletePlaylist(playlist.playlistId)
-        if (result.status == NeteaseAccountActionStatus.Success) {
-            invalidateAccountCaches()
-            NeteaseOnlineMemoryCache.invalidate(cacheKey("account:playlist-tracks", playlist.playlistId))
-        }
         return result
     }
 
@@ -769,9 +977,10 @@ internal class NeteaseOnlineMusicRepository(
         if (playlist.provider != provider) {
             return emptyList()
         }
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("account:playlist-tracks", playlist.playlistId),
             ttlMs = NeteaseAccountCacheTtlMs,
+            codec = OnlinePageCacheCodecs.Tracks,
         ) {
             client.getPlaylistSongs(
                 playlistId = playlist.playlistId,
@@ -784,9 +993,10 @@ internal class NeteaseOnlineMusicRepository(
         if (playlist.provider != provider) {
             return emptyList()
         }
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("playlist:tracks", playlist.playlistId),
             ttlMs = NeteaseDetailCacheTtlMs,
+            codec = OnlinePageCacheCodecs.Tracks,
         ) {
             client.getPlaylistSongs(
                 playlistId = playlist.playlistId,
@@ -799,9 +1009,10 @@ internal class NeteaseOnlineMusicRepository(
         if (album.provider != provider) {
             return emptyList()
         }
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("album:tracks", album.albumId),
             ttlMs = NeteaseDetailCacheTtlMs,
+            codec = OnlinePageCacheCodecs.Tracks,
         ) {
             client.getAlbumSongs(
                 albumId = album.albumId,
@@ -814,9 +1025,10 @@ internal class NeteaseOnlineMusicRepository(
         if (artist.provider != provider) {
             return emptyList()
         }
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("artist:tracks", artist.artistId),
             ttlMs = NeteaseDetailCacheTtlMs,
+            codec = OnlinePageCacheCodecs.Tracks,
         ) {
             client.getArtistTopSongs(
                 artistId = artist.artistId,
@@ -829,9 +1041,10 @@ internal class NeteaseOnlineMusicRepository(
         if (artist.provider != provider) {
             return emptyList()
         }
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("artist:albums", artist.artistId),
             ttlMs = NeteaseDetailCacheTtlMs,
+            codec = OnlinePageCacheCodecs.Albums,
         ) {
             client.getArtistAlbums(
                 artistId = artist.artistId,
@@ -844,9 +1057,10 @@ internal class NeteaseOnlineMusicRepository(
         if (artist.provider != provider) {
             return emptyList()
         }
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("artist:introduction", artist.artistId),
             ttlMs = NeteaseDetailCacheTtlMs,
+            codec = OnlinePageCacheCodecs.ArtistIntroductions,
         ) {
             client.getArtistIntroduction(artist.artistId)
         }
@@ -856,9 +1070,10 @@ internal class NeteaseOnlineMusicRepository(
         if (radio.provider != provider) {
             return emptyList()
         }
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("radio:tracks", radio.radioId),
             ttlMs = NeteaseDetailCacheTtlMs,
+            codec = OnlinePageCacheCodecs.Tracks,
         ) {
             client.getRadioPrograms(
                 radioId = radio.radioId,
@@ -871,15 +1086,23 @@ internal class NeteaseOnlineMusicRepository(
         playlist: NeteasePlaylistSummary,
         limit: Int = playlist.trackFetchLimit(),
     ): List<OnlineTrack> {
-        return NeteaseOnlineMemoryCache.getOrLoad(
+        return cachedPage(
             key = cacheKey("playlist:tracks", playlist.playlistId, limit),
             ttlMs = NeteaseDetailCacheTtlMs,
+            codec = OnlinePageCacheCodecs.Tracks,
         ) {
             client.getPlaylistSongs(
                 playlistId = playlist.playlistId,
                 limit = limit,
             )
         }
+    }
+
+    override suspend fun lyrics(identity: OnlineTrackIdentity): OnlineLyrics? {
+        if (identity.source != NeteaseSourceId) {
+            return null
+        }
+        return cachedLyrics(identity)
     }
 
     suspend fun resolvePlayableTrack(
@@ -889,12 +1112,13 @@ internal class NeteaseOnlineMusicRepository(
         if (track.source != NeteaseSourceId) {
             return null
         }
+        val identity = OnlineTrackIdentity(source = track.source, trackId = track.trackId)
         val playbackUrl = client.getPlaybackUrl(
             trackId = track.trackId,
             originalDurationMs = track.durationMs,
         ) ?: return null
         val lyrics = if (includeLyrics) {
-            runCatching { client.getLyrics(track.trackId) }.getOrNull()
+            runCatching { cachedLyrics(identity) }.getOrNull()
         } else {
             null
         }
@@ -903,6 +1127,18 @@ internal class NeteaseOnlineMusicRepository(
             mimeType = playbackUrl.mimeType,
             lyrics = lyrics,
         )
+    }
+
+    private suspend fun cachedLyrics(identity: OnlineTrackIdentity): OnlineLyrics {
+        return NeteaseOnlineMemoryCache.getOrLoad(
+            key = cacheKey("lyrics", identity.trackId),
+            ttlMs = NeteaseLyricsCacheTtlMs,
+        ) {
+            lyricsDiskCache?.get(identity)
+                ?: client.getLyrics(identity.trackId).also { lyrics ->
+                    lyricsDiskCache?.put(identity, lyrics)
+                }
+        }
     }
 
     override suspend fun resolvePlayableMediaItem(mediaItem: MediaItem): MediaItem? {
@@ -2036,6 +2272,8 @@ internal fun OnlineTrack.toMediaItem(
         .setIsPlayable(true)
         .setExtras(extras)
         .build()
+    val cacheKey = OnlineTrackIdentity(source = source, trackId = trackId)
+        .toOnlinePlaybackCacheKey()
     return MediaItem.Builder()
         .setMediaId(mediaId)
         .setMediaMetadata(metadata)
@@ -2043,6 +2281,7 @@ internal fun OnlineTrack.toMediaItem(
             playbackUrl?.takeIf(String::isNotBlank)?.let { url ->
                 setUri(Uri.parse(url))
                 setMimeType(mimeType ?: "audio/mpeg")
+                setCustomCacheKey(cacheKey)
             }
         }
         .build()
@@ -2108,6 +2347,24 @@ internal data class OnlineTrackIdentity(
     val source: String,
     val trackId: String,
 )
+
+internal fun OnlineTrackIdentity.toOnlinePlaybackCacheKey(): String {
+    return "$OnlineMediaIdPrefix$source:$trackId"
+}
+
+internal fun OnlineTrackIdentity.toOnlinePlaybackPlaceholderMediaItem(): MediaItem {
+    return OnlineTrack(
+        source = source,
+        trackId = trackId,
+        title = trackId,
+        artist = "",
+        album = null,
+        durationMs = 0L,
+        artworkUrl = null,
+    )
+        .toMediaItem()
+        .withOnlinePlaybackPlaceholderUri()
+}
 
 internal fun buildOnlineMediaId(source: String, trackId: String): String {
     return "$OnlineMediaIdPrefix$source:$trackId"

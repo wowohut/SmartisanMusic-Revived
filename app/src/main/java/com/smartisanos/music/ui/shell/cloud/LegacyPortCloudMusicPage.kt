@@ -113,7 +113,6 @@ internal fun LegacyPortCloudMusicPage(
     var authRevision by remember { mutableStateOf(0) }
     var homeState by remember { mutableStateOf<CloudMusicState>(CloudMusicState.LoadingFeatured) }
     var searchResultsState by remember { mutableStateOf<CloudSearchResultsState>(CloudSearchResultsState.Idle) }
-    var hotSearchState by remember { mutableStateOf<CloudHotSearchState>(CloudHotSearchState.Idle) }
     var searchCategory by rememberSaveable { mutableStateOf(CloudSearchCategory.All) }
     var bannerItems by remember { mutableStateOf<List<OnlineBanner>>(emptyList()) }
     var featuredHomeState by remember { mutableStateOf<CloudFeaturedHomeState>(CloudFeaturedHomeState.Loading) }
@@ -666,28 +665,6 @@ internal fun LegacyPortCloudMusicPage(
         }
     }
 
-    LaunchedEffect(searchActive, query, authRevision) {
-        if (!searchActive || query.trim().isNotEmpty()) {
-            return@LaunchedEffect
-        }
-        hotSearchState = CloudHotSearchState.Loading
-        val result = runSuspendCatching {
-            activeRepository.searchHotKeywords()
-        }
-        hotSearchState = result.fold(
-            onSuccess = { keywords ->
-                if (keywords.isEmpty()) {
-                    CloudHotSearchState.Empty
-                } else {
-                    CloudHotSearchState.Success(keywords)
-                }
-            },
-            onFailure = {
-                CloudHotSearchState.Error
-            },
-        )
-    }
-
     LaunchedEffect(query, authRevision, searchActive) {
         val normalizedQuery = query.trim()
         if (!searchActive || normalizedQuery.isEmpty()) {
@@ -941,6 +918,7 @@ internal fun LegacyPortCloudMusicPage(
     val featuredHomeVisible = !searchActive &&
         normalizedQuery.isEmpty() &&
         currentRoute == CloudMusicRoute.Home
+    val sectionTitleVisible = !searchPromptVisible
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -1003,10 +981,12 @@ internal fun LegacyPortCloudMusicPage(
                 modifier = Modifier.matchParentSize(),
             )
             Column(modifier = Modifier.matchParentSize()) {
-                CloudMusicSectionTitle(
-                    title = sectionTitle,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                if (sectionTitleVisible) {
+                    CloudMusicSectionTitle(
+                        title = sectionTitle,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1228,15 +1208,10 @@ internal fun LegacyPortCloudMusicPage(
                             when (route) {
                                 CloudMusicRoute.Search -> {
                                     if (searchPromptVisible) {
-                                        CloudHotSearchContent(
-                                            state = hotSearchState,
-                                            playbackBarOverlayHeight = playbackBarOverlayHeight,
-                                            onRetryClick = { authRevision += 1 },
-                                            onKeywordClick = { keyword ->
-                                                query = keyword
-                                                searchCategory = CloudSearchCategory.All
-                                            },
-                                            modifier = Modifier.fillMaxSize(),
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(ComposeColor.White),
                                         )
                                     } else {
                                         CloudMusicSearchResultsContent(

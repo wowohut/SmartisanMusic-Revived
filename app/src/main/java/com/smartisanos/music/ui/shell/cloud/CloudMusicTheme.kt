@@ -19,7 +19,6 @@ internal val CloudSearchCategoryBarHeight = 42.dp
 internal val CloudBannerHeight = 142.dp
 internal val CloudHomeCoverCardWidth = 96.dp
 internal val CloudHomeTrackPreviewRowHeight = 48.dp
-internal val CloudHotSearchRowHeight = 58.dp
 internal val CloudSearchCoverRowHeight = 72.dp
 internal val CloudSearchCoverArtworkSize = 48.dp
 internal val CloudDetailHeaderHeight = 88.dp
@@ -104,11 +103,6 @@ internal fun OnlineRadio.subtitleText(context: Context): String {
         .takeIf(String::isNotBlank)
         ?: subtitle
         ?: context.getString(R.string.cloud_music_radio_provider_netease)
-}
-
-internal fun Long.toHotSearchHeatText(context: Context): String? {
-    return takeIf { score -> score >= 10_000L }
-        ?.let { score -> context.getString(R.string.cloud_music_hot_search_heat_wan, score / 10_000L) }
 }
 
 internal fun Context.dpPx(value: Int): Int {

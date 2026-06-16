@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -38,10 +37,8 @@ import com.smartisanos.music.data.online.OnlineAlbum
 import com.smartisanos.music.data.online.OnlineArtist
 import com.smartisanos.music.data.online.OnlineMusicProviderRepository
 import com.smartisanos.music.data.online.OnlinePlaylist
-import com.smartisanos.music.data.online.OnlineSearchHotKeyword
 import com.smartisanos.music.data.online.OnlineSearchResults
 import com.smartisanos.music.data.online.OnlineTrack
-import com.smartisanos.music.ui.shell.cloud.components.CloudHomeCoverCard
 import com.smartisanos.music.ui.shell.cloud.components.CloudHomeSectionHeader
 import com.smartisanos.music.ui.shell.cloud.components.CloudMusicBlankState
 import com.smartisanos.music.ui.shell.cloud.components.CloudMusicCoverImage
@@ -56,14 +53,6 @@ internal sealed interface CloudSearchResultsState {
     data class Empty(val query: String) : CloudSearchResultsState
     data class Error(val query: String) : CloudSearchResultsState
     data class Success(val results: OnlineSearchResults) : CloudSearchResultsState
-}
-
-internal sealed interface CloudHotSearchState {
-    object Idle : CloudHotSearchState
-    object Loading : CloudHotSearchState
-    object Empty : CloudHotSearchState
-    object Error : CloudHotSearchState
-    data class Success(val keywords: List<OnlineSearchHotKeyword>) : CloudHotSearchState
 }
 
 internal enum class CloudSearchCategory(
@@ -115,7 +104,7 @@ internal fun CloudMusicSearchResultsContent(
             modifier = modifier,
         )
         is CloudSearchResultsState.Success -> {
-            Column(modifier = modifier) {
+            Column(modifier = modifier.background(ComposeColor.White)) {
                 CloudSearchCategoryBar(
                     selectedCategory = selectedCategory,
                     onCategoryChange = onCategoryChange,
@@ -215,123 +204,6 @@ internal fun CloudMusicSearchResultsContent(
 }
 
 @Composable
-internal fun CloudHotSearchContent(
-    state: CloudHotSearchState,
-    playbackBarOverlayHeight: Dp,
-    onRetryClick: () -> Unit,
-    onKeywordClick: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    when (state) {
-        CloudHotSearchState.Idle,
-        CloudHotSearchState.Loading -> CloudMusicDelayedLoadingState(
-            title = stringResource(R.string.cloud_music_hot_search_loading),
-            modifier = modifier,
-        )
-        CloudHotSearchState.Empty -> CloudMusicBlankState(
-            title = stringResource(R.string.cloud_music_hot_search_empty),
-            subtitle = stringResource(R.string.cloud_music_empty_subtitle),
-            modifier = modifier,
-        )
-        CloudHotSearchState.Error -> CloudMusicBlankState(
-            title = stringResource(R.string.cloud_music_hot_search_error),
-            subtitle = stringResource(R.string.cloud_music_empty_subtitle),
-            actionText = stringResource(R.string.cloud_music_retry),
-            onActionClick = onRetryClick,
-            modifier = modifier,
-        )
-        is CloudHotSearchState.Success -> {
-            Column(
-                modifier = modifier
-                    .verticalScroll(rememberScrollState())
-                    .background(ComposeColor.White)
-                    .padding(bottom = playbackBarOverlayHeight + 10.dp),
-            ) {
-                CloudHomeSectionHeader(
-                    title = stringResource(R.string.cloud_music_section_hot_search),
-                    actionText = null,
-                    onClick = null,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                state.keywords.forEachIndexed { index, keyword ->
-                    CloudHotSearchRow(
-                        index = index + 1,
-                        keyword = keyword,
-                        onClick = { onKeywordClick(keyword.keyword) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    CloudMusicDivider()
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun CloudHotSearchRow(
-    index: Int,
-    keyword: OnlineSearchHotKeyword,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val context = LocalContext.current
-    val heatText = keyword.score.toHotSearchHeatText(context)
-    Row(
-        modifier = modifier
-            .height(CloudHotSearchRowHeight)
-            .cloudMusicPressable(onClick = onClick)
-            .padding(start = 12.dp, end = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = index.toString(),
-            style = TextStyle(
-                fontSize = 15.sp,
-                color = if (index <= 3) CloudAccentColor else ComposeColor(0x66000000),
-            ),
-            modifier = Modifier.width(28.dp),
-        )
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Text(
-                text = keyword.keyword,
-                style = TextStyle(
-                    fontSize = 15.sp,
-                    color = ComposeColor(0xCC000000),
-                ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            keyword.subtitle?.takeIf(String::isNotBlank)?.let { subtitle ->
-                Text(
-                    text = subtitle,
-                    style = TextStyle(
-                        fontSize = 11.sp,
-                        color = CloudSecondaryTextColor,
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
-        }
-        if (heatText != null) {
-            Text(
-                text = heatText,
-                style = TextStyle(
-                    fontSize = 10.sp,
-                    color = ComposeColor(0x4D000000),
-                ),
-                maxLines = 1,
-                modifier = Modifier.padding(start = 8.dp),
-            )
-        }
-    }
-}
-
-@Composable
 internal fun CloudSearchCategoryBar(
     selectedCategory: CloudSearchCategory,
     onCategoryChange: (CloudSearchCategory) -> Unit,
@@ -392,13 +264,15 @@ internal fun CloudSearchAllResults(
 ) {
     Column(
         modifier = modifier
+            .background(ComposeColor.White)
             .verticalScroll(rememberScrollState())
             .padding(bottom = playbackBarOverlayHeight + 10.dp),
     ) {
-        CloudHomeTrackPreviewSection(
+        CloudSearchTrackPreviewSection(
             title = stringResource(R.string.search_tab_songs),
             tracks = results.tracks,
-            onClick = onTracksClick,
+            actionText = stringResource(R.string.cloud_music_section_view_all),
+            onActionClick = onTracksClick,
             modifier = Modifier.fillMaxWidth(),
         )
         CloudHomeArtistSection(
@@ -425,6 +299,36 @@ internal fun CloudSearchAllResults(
             onPlaylistClick = onPlaylistClick,
             modifier = Modifier.fillMaxWidth(),
         )
+    }
+}
+
+@Composable
+private fun CloudSearchTrackPreviewSection(
+    title: String,
+    tracks: List<OnlineTrack>,
+    actionText: String?,
+    onActionClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (tracks.isEmpty()) {
+        return
+    }
+    Column(modifier = modifier.background(ComposeColor.White)) {
+        CloudHomeSectionHeader(
+            title = title,
+            actionText = actionText,
+            onClick = onActionClick,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        tracks.take(CloudSearchPreviewTrackCount).forEachIndexed { index, track ->
+            CloudHomeTrackPreviewRow(
+                index = index + 1,
+                track = track,
+                onClick = onActionClick,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            CloudMusicDivider()
+        }
     }
 }
 
@@ -510,3 +414,5 @@ internal fun <T> CloudSearchCoverResultList(
         }
     }
 }
+
+private const val CloudSearchPreviewTrackCount = 4

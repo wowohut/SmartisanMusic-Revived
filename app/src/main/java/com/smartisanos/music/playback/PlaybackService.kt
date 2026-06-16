@@ -36,11 +36,13 @@ import com.smartisanos.music.data.library.LibraryExclusions
 import com.smartisanos.music.data.library.LibraryExclusionsStore
 import com.smartisanos.music.data.online.OnlineMusicRepositoryRouter
 import com.smartisanos.music.data.online.OnlineTrackIdentity
+import com.smartisanos.music.data.online.buildOnlineMediaId
 import com.smartisanos.music.data.online.isOnlineMediaItem
 import com.smartisanos.music.data.online.isNeteasePreviewDuration
 import com.smartisanos.music.data.online.onlinePlaybackUriIdentityOrNull
 import com.smartisanos.music.data.online.onlineTrackIdentityOrNull
 import com.smartisanos.music.data.online.shouldRefreshOnlinePlaybackUrl
+import com.smartisanos.music.data.online.toOnlinePlaybackPlaceholderMediaItem
 import com.smartisanos.music.data.online.withOnlinePlaybackPlaceholderUri
 import com.smartisanos.music.data.playback.PlaybackStatsRepository
 import com.smartisanos.music.data.settings.PlaybackSettingsStore
@@ -129,12 +131,20 @@ class PlaybackService : MediaLibraryService() {
             DefaultDataSource.Factory(this),
             OnlinePlaybackDataSpecResolver(onlineMusicRepository),
         )
-        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
+        val mediaSourceFactory = DefaultMediaSourceFactory(
+            PlaybackStreamingCache.createDataSourceFactory(
+                context = this,
+                upstreamFactory = dataSourceFactory,
+            ),
+        )
         val exoPlayer = ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .build()
+            .apply {
+                setWakeMode(C.WAKE_MODE_NETWORK)
+            }
         val artworkBitmapLoader = MediaSessionArtworkBitmapLoader(this)
 
         player = exoPlayer
@@ -336,12 +346,17 @@ class PlaybackService : MediaLibraryService() {
         if (identities.isEmpty()) {
             return emptyList()
         }
-        return runCatching {
+        val resolvedItems = runCatching {
             onlineMusicRepository.resolvePlayableItems(
                 identities = identities,
                 includeLyrics = false,
             )
         }.getOrDefault(emptyList())
+        val resolvedItemsByMediaId = resolvedItems.associateBy(MediaItem::mediaId)
+        return identities.map { identity ->
+            val mediaId = buildOnlineMediaId(identity.source, identity.trackId)
+            resolvedItemsByMediaId[mediaId] ?: identity.toOnlinePlaybackPlaceholderMediaItem()
+        }
     }
 
     private fun createSessionActivityPendingIntent(): PendingIntent {

@@ -182,7 +182,6 @@
     <string name="cloud_music_section_search">Search NetEase Cloud Music</string>
     <string name="cloud_music_section_search_results">Search Results</string>
     <string name="cloud_music_section_search_artists">Artist Search</string>
-    <string name="cloud_music_section_hot_search">Hot Searches</string>
     <string name="cloud_music_section_netease_picks">NetEase Picks</string>
     <string name="cloud_music_section_featured_playlists">Featured Playlists</string>
     <string name="cloud_music_section_hot_charts">Popular Charts</string>
@@ -198,10 +197,6 @@
     <string name="cloud_music_search_tab_all">All</string>
     <string name="cloud_music_search_hint_artist">Search NetEase Cloud Music artists</string>
     <string name="cloud_music_search_cancel">Cancel</string>
-    <string name="cloud_music_hot_search_loading">Loading hot searches</string>
-    <string name="cloud_music_hot_search_empty">No hot searches</string>
-    <string name="cloud_music_hot_search_error">Hot searches are unavailable</string>
-    <string name="cloud_music_hot_search_heat_wan">%1$d0k</string>
     <string name="cloud_music_banner_fallback_title">NetEase Cloud Music</string>
     <string name="cloud_music_banner_fallback_subtitle">Today\'s picks and popular content</string>
     <string name="cloud_music_artists_loading">Loading artists</string>

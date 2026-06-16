@@ -234,6 +234,8 @@ internal interface OnlineMusicProviderRepository {
 
     suspend fun radioTracks(radio: OnlineRadio): List<OnlineTrack> = emptyList()
 
+    suspend fun lyrics(identity: OnlineTrackIdentity): OnlineLyrics? = null
+
     suspend fun resolvePlayableMediaItem(mediaItem: MediaItem): MediaItem?
 
     suspend fun resolvePlayableMediaItems(
@@ -254,6 +256,7 @@ internal fun MediaItem.withOnlinePlaybackPlaceholderUri(): MediaItem {
     return buildUpon()
         .setUri(identity.toOnlinePlaybackUri())
         .setMimeType("audio/mpeg")
+        .setCustomCacheKey(identity.toOnlinePlaybackCacheKey())
         .build()
 }
 
