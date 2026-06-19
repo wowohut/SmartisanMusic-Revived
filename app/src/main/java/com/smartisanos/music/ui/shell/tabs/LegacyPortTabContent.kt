@@ -19,6 +19,7 @@ import com.smartisanos.music.data.favorite.FavoriteSongRecord
 import com.smartisanos.music.data.settings.ArtistSettings
 import com.smartisanos.music.data.settings.AudioFxPreset
 import com.smartisanos.music.data.settings.NeteaseAudioQuality
+import com.smartisanos.music.data.settings.NavigationSettings
 import com.smartisanos.music.data.settings.OnlineMusicSettings
 import com.smartisanos.music.data.settings.PlaybackSettings
 import com.smartisanos.music.ui.album.AlbumViewMode
@@ -76,6 +77,8 @@ internal fun LegacyPortTabContent(
     onArtistSeparatorsChange: (Set<String>) -> Unit,
     onNeteasePlaybackQualityChange: (NeteaseAudioQuality) -> Unit,
     onNeteaseAuthChanged: () -> Unit,
+    navigationSettings: NavigationSettings,
+    onTabVisibilityChange: (String, Boolean) -> Unit,
     onMediaIdsHidden: (Set<String>) -> Unit,
     onRequestDeleteMediaIds: (Set<String>) -> Unit,
     onRequestSongDeleteConfirmation: (Set<String>, (() -> Unit)?) -> Unit,
@@ -220,6 +223,8 @@ internal fun LegacyPortTabContent(
                 onArtistSeparatorsChange = onArtistSeparatorsChange,
                 onNeteasePlaybackQualityChange = onNeteasePlaybackQualityChange,
                 onNeteaseAuthChanged = onNeteaseAuthChanged,
+                navigationSettings = navigationSettings,
+                onTabVisibilityChange = onTabVisibilityChange,
                 onMediaIdsHidden = onMediaIdsHidden,
                 onRequestDeleteMediaIds = onRequestDeleteMediaIds,
                 onLovedSongsTrackMoreClick = onLovedSongsTrackMoreClick,

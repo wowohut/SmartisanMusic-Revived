@@ -16,6 +16,7 @@ import smartisanos.widget.tabswitcher.TabSwitcher
 @Composable
 internal fun LegacyPortBottomBar(
     currentDestination: MusicDestination,
+    destinations: List<MusicDestination>,
     onDestinationSelected: (MusicDestination) -> Unit,
     modifier: Modifier = Modifier,
     topChromeVisible: Boolean = true,
@@ -41,6 +42,8 @@ internal fun LegacyPortBottomBar(
                 bottom = navigationBarInsetPx,
             )
             tabSwitcher.setTopChromeVisible(topChromeVisible)
+            // 先更新可见 tab 列表（重建时会校正选中态），再下发当前选中项。
+            tabSwitcher.setDestinations(destinations)
             tabSwitcher.setOnDestinationSelectedListener(onDestinationSelected)
             tabSwitcher.setCurrentDestination(currentDestination)
         },

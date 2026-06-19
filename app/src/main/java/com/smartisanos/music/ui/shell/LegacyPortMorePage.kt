@@ -52,6 +52,7 @@ import com.smartisanos.music.data.favorite.FavoriteSongRecord
 import com.smartisanos.music.data.settings.ArtistSettings
 import com.smartisanos.music.data.settings.AudioFxPreset
 import com.smartisanos.music.data.settings.NeteaseAudioQuality
+import com.smartisanos.music.data.settings.NavigationSettings
 import com.smartisanos.music.data.settings.OnlineMusicSettings
 import com.smartisanos.music.data.settings.PlaybackSettings
 import com.smartisanos.music.data.library.LibraryExclusions
@@ -121,6 +122,8 @@ internal fun LegacyPortMorePage(
     onArtistSeparatorsChange: (Set<String>) -> Unit,
     onNeteasePlaybackQualityChange: (NeteaseAudioQuality) -> Unit,
     onNeteaseAuthChanged: () -> Unit,
+    navigationSettings: NavigationSettings,
+    onTabVisibilityChange: (String, Boolean) -> Unit,
     onMediaIdsHidden: (Set<String>) -> Unit,
     onRequestDeleteMediaIds: (Set<String>) -> Unit,
     onLovedSongsTrackMoreClick: (MediaItem) -> Unit,
@@ -222,6 +225,7 @@ internal fun LegacyPortMorePage(
                         playbackSettings = playbackSettings,
                         artistSettings = artistSettings,
                         onlineMusicSettings = onlineMusicSettings,
+                        navigationSettings = navigationSettings,
                         onClose = {
                             secondaryTarget = null
                         },
@@ -234,6 +238,7 @@ internal fun LegacyPortMorePage(
                         onArtistSeparatorsChange = onArtistSeparatorsChange,
                         onNeteasePlaybackQualityChange = onNeteasePlaybackQualityChange,
                         onNeteaseAuthChanged = onNeteaseAuthChanged,
+                        onTabVisibilityChange = onTabVisibilityChange,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }

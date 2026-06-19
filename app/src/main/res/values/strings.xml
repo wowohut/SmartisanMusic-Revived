@@ -369,4 +369,11 @@
     <plurals name="legacy_playlist_song_count">
         <item quantity="other">%1$d 首歌曲</item>
     </plurals>
+    <string name="settings_section_navigation">底部导航栏</string>
+    <string name="bottom_tab_visibility">导航栏显示项</string>
+    <string name="bottom_tab_more_locked">固定显示</string>
+    <plurals name="bottom_tab_hidden_summary">
+        <item quantity="other">已隐藏 %1$d 项</item>
+    </plurals>
+    <string name="bottom_tab_all_visible">全部显示</string>
 </resources>

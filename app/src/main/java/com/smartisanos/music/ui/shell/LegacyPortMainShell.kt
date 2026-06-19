@@ -61,10 +61,13 @@ import com.smartisanos.music.data.settings.ArtistSettings
 import com.smartisanos.music.data.settings.ArtistSettingsStore
 import com.smartisanos.music.data.settings.LibraryDisplaySettings
 import com.smartisanos.music.data.settings.LibraryDisplaySettingsStore
+import com.smartisanos.music.data.settings.NavigationSettings
+import com.smartisanos.music.data.settings.NavigationSettingsStore
 import com.smartisanos.music.data.settings.OnlineMusicSettings
 import com.smartisanos.music.data.settings.OnlineMusicSettingsStore
 import com.smartisanos.music.data.settings.PlaybackSettings
 import com.smartisanos.music.data.settings.PlaybackSettingsStore
+import com.smartisanos.music.data.settings.visibleDestinations
 import com.smartisanos.music.isExternalAudioLaunchItem
 import com.smartisanos.music.playback.LocalAudioLibrary
 import com.smartisanos.music.playback.LocalPlaybackController
@@ -157,12 +160,16 @@ private fun LegacyPortMainShellContent(
     val libraryDisplaySettingsStore = remember(context.applicationContext) {
         LibraryDisplaySettingsStore(context.applicationContext)
     }
+    val navigationSettingsStore = remember(context.applicationContext) {
+        NavigationSettingsStore(context.applicationContext)
+    }
     val favoriteIds by favoriteRepository.observeFavoriteIds().collectAsState(initial = emptySet())
     val libraryExclusions by libraryExclusionsStore.exclusions.collectAsState(initial = LibraryExclusions())
     val playbackSettings by playbackSettingsStore.settings.collectAsState(initial = PlaybackSettings())
     val onlineMusicSettings by onlineMusicSettingsStore.settings.collectAsState(initial = OnlineMusicSettings())
     val artistSettings by artistSettingsStore.settings.collectAsState(initial = ArtistSettings())
     val libraryDisplaySettings by libraryDisplaySettingsStore.settings.collectAsState(initial = LibraryDisplaySettings())
+    val navigationSettings by navigationSettingsStore.settings.collectAsState(initial = NavigationSettings())
     val albumViewMode = libraryDisplaySettings.albumViewMode
     val artistAlbumViewMode = libraryDisplaySettings.artistAlbumViewMode
     val unknownSongTitle = stringResource(R.string.unknown_song_title)
@@ -175,6 +182,19 @@ private fun LegacyPortMainShellContent(
     var currentDestination by remember { mutableStateOf(MusicDestination.Playlist) }
     var playlistAddModeActive by remember { mutableStateOf(false) }
     var moreSettingsPageActive by remember { mutableStateOf(false) }
+
+    // 底部导航栏可见 tab 列表：根据用户隐藏配置计算，进入「添加到播放列表」模式时
+    // 临时补回 Songs tab（该模式强制把选中项切到 Songs）。
+    val visibleDestinations = remember(navigationSettings, playlistAddModeActive) {
+        val forceVisible = if (playlistAddModeActive) setOf(MusicDestination.Songs) else emptySet()
+        navigationSettings.visibleDestinations(forceVisible = forceVisible)
+    }
+    // 当前选中 tab 被隐藏时，自动切到第一个仍可见的 tab（More 始终可见，无需校正）。
+    LaunchedEffect(visibleDestinations) {
+        if (currentDestination !in visibleDestinations && currentDestination != MusicDestination.More) {
+            currentDestination = visibleDestinations.firstOrNull() ?: MusicDestination.Playlist
+        }
+    }
     var cloudMusicSearchOpenRequest by remember { mutableStateOf(0) }
     var cloudMusicAccountRefreshRequest by remember { mutableStateOf(0) }
     var songsEditMode by remember { mutableStateOf(false) }
@@ -844,6 +864,12 @@ private fun LegacyPortMainShellContent(
                 onNeteaseAuthChanged = {
                     cloudMusicAccountRefreshRequest += 1
                 },
+                navigationSettings = navigationSettings,
+                onTabVisibilityChange = { route, visible ->
+                    scope.launch {
+                        navigationSettingsStore.setTabVisible(route, visible)
+                    }
+                },
                 onMediaIdsHidden = ::reclaimHiddenMediaIds,
                 onRequestDeleteMediaIds = ::requestSystemDeleteMediaIds,
                 onRequestSongDeleteConfirmation = { mediaIds, onDismiss ->
@@ -946,6 +972,7 @@ private fun LegacyPortMainShellContent(
                 }
                 LegacyPortBottomBar(
                     currentDestination = if (playlistAddModeActive) MusicDestination.Songs else currentDestination,
+                    destinations = visibleDestinations,
                     onDestinationSelected = { destination ->
                         currentDestination = destination
                     },

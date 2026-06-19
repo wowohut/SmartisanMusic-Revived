@@ -26,6 +26,7 @@ class TabSwitcher @JvmOverloads constructor(
     private val topDividerView: View
     private val destinationViews = mutableMapOf<MusicDestination, BottomTabItemView>()
     private var selectedDestination = MusicDestination.Playlist
+    private var currentDestinations: List<MusicDestination> = emptyList()
     private var startInset = 0
     private var endInset = 0
     private var bottomInset = 0
@@ -109,6 +110,10 @@ class TabSwitcher @JvmOverloads constructor(
     }
 
     fun setDestinations(destinations: List<MusicDestination>) {
+        if (destinations == currentDestinations) {
+            return
+        }
+        currentDestinations = destinations
         tabContainer.removeAllViews()
         destinationViews.clear()
         tabContainer.weightSum = destinations.size.toFloat().coerceAtLeast(1f)
@@ -143,7 +148,16 @@ class TabSwitcher @JvmOverloads constructor(
             destinationViews[destination] = itemView
         }
 
-        selectDestination(selectedDestination, notify = false, animate = false)
+        // 重建后刷新选中态：若当前选中 tab 仍在可见列表中则保持高亮，
+        // 否则清除高亮，等待上层通过 setCurrentDestination 下发新的选中项
+        // （选中态的真相源在 Compose 层，View 层不擅自切换）。
+        if (selectedDestination in destinationViews) {
+            selectDestination(selectedDestination, notify = false, animate = false)
+        } else {
+            suppressSelectionCallback = true
+            destinationViews.values.forEach { it.setChecked(false, false) }
+            suppressSelectionCallback = false
+        }
     }
 
     private fun selectDestination(

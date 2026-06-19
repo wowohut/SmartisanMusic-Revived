@@ -57,13 +57,16 @@ import com.smartisanos.music.data.settings.ArtistSettings
 import com.smartisanos.music.data.settings.AudioFxMaxGainDb
 import com.smartisanos.music.data.settings.AudioFxMinGainDb
 import com.smartisanos.music.data.settings.AudioFxPreset
+import com.smartisanos.music.data.settings.canHideAnyTab
 import com.smartisanos.music.data.settings.NeteaseAudioQuality
+import com.smartisanos.music.data.settings.NavigationSettings
 import com.smartisanos.music.data.settings.OnlineMusicSettings
 import com.smartisanos.music.data.settings.PlaybackSettings
 import com.smartisanos.music.data.settings.equalizerGainDbPoints
 import com.smartisanos.music.data.settings.normalizeAudioFxGainDbPoints
 import com.smartisanos.music.data.settings.parseArtistSeparatorInput
 import com.smartisanos.music.ui.online.NeteaseWebLoginActivity
+import com.smartisanos.music.ui.navigation.MusicDestination
 import com.smartisanos.music.ui.shell.titlebar.LegacyPortSmartisanTitleBar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -79,6 +82,7 @@ internal fun LegacyPortSettingsPage(
     playbackSettings: PlaybackSettings,
     artistSettings: ArtistSettings,
     onlineMusicSettings: OnlineMusicSettings,
+    navigationSettings: NavigationSettings,
     onClose: () -> Unit,
     onScratchEnabledChange: (Boolean) -> Unit,
     onHidePlayerAxisEnabledChange: (Boolean) -> Unit,
@@ -89,6 +93,7 @@ internal fun LegacyPortSettingsPage(
     onArtistSeparatorsChange: (Set<String>) -> Unit,
     onNeteasePlaybackQualityChange: (NeteaseAudioQuality) -> Unit,
     onNeteaseAuthChanged: () -> Unit,
+    onTabVisibilityChange: (String, Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -167,6 +172,7 @@ internal fun LegacyPortSettingsPage(
                 playbackSettings = playbackSettings,
                 artistSettings = artistSettings,
                 onlineMusicSettings = onlineMusicSettings,
+                navigationSettings = navigationSettings,
                 neteaseAuthState = neteaseAuthState,
                 onClose = onClose,
                 onNeteaseAccountClick = {
@@ -196,6 +202,9 @@ internal fun LegacyPortSettingsPage(
                     artistSeparatorsInitialValues = artistSettings.separators
                     editingArtistSeparators = true
                 },
+                onNavigationClick = {
+                    secondaryPage = LegacySettingsSecondaryPage.Navigation
+                },
                 modifier = Modifier.fillMaxSize(),
             )
         },
@@ -219,6 +228,15 @@ internal fun LegacyPortSettingsPage(
                         secondaryPage = null
                     },
                     onNeteasePlaybackQualityChange = onNeteasePlaybackQualityChange,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                LegacySettingsSecondaryPage.Navigation -> LegacyNavigationSettingsPage(
+                    active = active,
+                    navigationSettings = navigationSettings,
+                    onClose = {
+                        secondaryPage = null
+                    },
+                    onTabVisibilityChange = onTabVisibilityChange,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -299,6 +317,7 @@ private fun LegacySettingsRootPage(
     playbackSettings: PlaybackSettings,
     artistSettings: ArtistSettings,
     onlineMusicSettings: OnlineMusicSettings,
+    navigationSettings: NavigationSettings,
     neteaseAuthState: NeteaseAuthState,
     onClose: () -> Unit,
     onNeteaseAccountClick: () -> Unit,
@@ -308,6 +327,7 @@ private fun LegacySettingsRootPage(
     onPopcornSoundEnabledChange: (Boolean) -> Unit,
     onAudioFxClick: () -> Unit,
     onArtistSeparatorsClick: () -> Unit,
+    onNavigationClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -338,6 +358,7 @@ private fun LegacySettingsRootPage(
                     settings = playbackSettings,
                     artistSettings = artistSettings,
                     onlineMusicSettings = onlineMusicSettings,
+                    navigationSettings = navigationSettings,
                     neteaseAuthState = neteaseAuthState,
                     onNeteaseAccountClick = onNeteaseAccountClick,
                     onNeteasePlaybackQualityClick = onNeteasePlaybackQualityClick,
@@ -346,6 +367,7 @@ private fun LegacySettingsRootPage(
                     onPopcornSoundEnabledChange = onPopcornSoundEnabledChange,
                     onAudioFxClick = onAudioFxClick,
                     onArtistSeparatorsClick = onArtistSeparatorsClick,
+                    onNavigationClick = onNavigationClick,
                 )
             },
         )
@@ -438,6 +460,47 @@ private fun LegacyOnlineQualitySettingsPage(
     }
 }
 
+@Composable
+private fun LegacyNavigationSettingsPage(
+    active: Boolean,
+    navigationSettings: NavigationSettings,
+    onClose: () -> Unit,
+    onTabVisibilityChange: (String, Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(ComposeColor.White),
+    ) {
+        LegacyPortSmartisanTitleBar(
+            modifier = Modifier.fillMaxWidth(),
+            showShadow = true,
+        ) { titleBar ->
+            titleBar.setupLegacySettingsTitleBar(
+                titleRes = R.string.bottom_tab_visibility,
+                onClose = onClose,
+                closeAffordance = LegacySettingsCloseAffordance.Back,
+            )
+        }
+        AndroidView(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            factory = { context ->
+                LegacyNavigationContentView(context)
+            },
+            update = { view ->
+                view.visibility = if (active) View.VISIBLE else View.INVISIBLE
+                view.bind(
+                    hiddenTabs = navigationSettings.hiddenTabs,
+                    onTabVisibilityChange = onTabVisibilityChange,
+                )
+            },
+        )
+    }
+}
+
 private enum class LegacySettingsRowShape(
     val backgroundRes: Int,
     val shadowRes: Int,
@@ -451,6 +514,7 @@ private enum class LegacySettingsRowShape(
 private enum class LegacySettingsSecondaryPage {
     AudioFx,
     OnlineQuality,
+    Navigation,
 }
 
 private val AudioFxFrequencyLabels = listOf("60", "230", "910", "4k", "14k")
@@ -494,6 +558,26 @@ private fun NeteaseAuthState.toAccountSummary(context: Context): String {
         context.getString(R.string.netease_logged_in)
     } else {
         context.getString(R.string.cloud_music_account_not_logged_in)
+    }
+}
+
+/**
+ * 底部导航栏设置项右侧摘要：统计被隐藏的可隐藏 tab 数量（「更多」不计入）。
+ */
+private fun NavigationSettings.toHiddenSummary(context: Context): String {
+    val hideableRoutes = MusicDestination.entries
+        .filter { it != MusicDestination.More }
+        .map { it.route }
+        .toSet()
+    val hiddenCount = hiddenTabs.count { it in hideableRoutes }
+    return if (hiddenCount == 0) {
+        context.getString(R.string.bottom_tab_all_visible)
+    } else {
+        context.resources.getQuantityString(
+            R.plurals.bottom_tab_hidden_summary,
+            hiddenCount,
+            hiddenCount,
+        )
     }
 }
 
@@ -569,6 +653,11 @@ private class LegacySettingsContentView(context: Context) : ScrollView(context) 
     private val popcornRow = LegacySettingsSwitchRow(context, R.string.popcorn_sound)
     private val audioFxRow = LegacySettingsValueRow(context, R.string.audio_fx)
     private val artistSeparatorsRow = LegacySettingsValueRow(context, R.string.artist_separators)
+    private val bottomTabRow = LegacySettingsValueRow(
+        context = context,
+        titleRes = R.string.bottom_tab_visibility,
+        showArrow = true,
+    )
 
     init {
         setBackgroundResource(R.drawable.account_background)
@@ -613,12 +702,21 @@ private class LegacySettingsContentView(context: Context) : ScrollView(context) 
             ),
         )
         content.addView(gapView(context))
+        content.addView(sectionTitleView(context, R.string.settings_section_navigation))
+        content.addView(
+            settingsGroup(
+                context,
+                bottomTabRow to LegacySettingsRowShape.Single,
+            ),
+        )
+        content.addView(gapView(context))
     }
 
     fun bind(
         settings: PlaybackSettings,
         artistSettings: ArtistSettings,
         onlineMusicSettings: OnlineMusicSettings,
+        navigationSettings: NavigationSettings,
         neteaseAuthState: NeteaseAuthState,
         onNeteaseAccountClick: () -> Unit,
         onNeteasePlaybackQualityClick: () -> Unit,
@@ -627,6 +725,7 @@ private class LegacySettingsContentView(context: Context) : ScrollView(context) 
         onPopcornSoundEnabledChange: (Boolean) -> Unit,
         onAudioFxClick: () -> Unit,
         onArtistSeparatorsClick: () -> Unit,
+        onNavigationClick: () -> Unit,
     ) {
         neteaseAccountRow.bind(
             value = neteaseAuthState.toAccountSummary(context),
@@ -646,6 +745,10 @@ private class LegacySettingsContentView(context: Context) : ScrollView(context) 
         artistSeparatorsRow.bind(
             value = artistSettings.separators.toSeparatorSummary(context),
             onClick = onArtistSeparatorsClick,
+        )
+        bottomTabRow.bind(
+            value = navigationSettings.toHiddenSummary(context),
+            onClick = onNavigationClick,
         )
     }
 
@@ -856,6 +959,162 @@ private class LegacyOnlineQualityContentView(context: Context) : ScrollView(cont
             leftMargin = margin
             rightMargin = margin
         }
+    }
+}
+
+/**
+ * 底部导航栏显示项二级页内容视图。
+ *
+ * 5 个可隐藏 tab（播放列表/云音乐/艺术家/专辑/歌曲）各一个开关行，开关语义为「显示该 tab」；
+ * 「更多」tab 固定显示，用禁用开关行 + 「固定显示」摘要标注。至少保留 1 个可隐藏 tab 可见。
+ */
+private class LegacyNavigationContentView(context: Context) : ScrollView(context) {
+    private val content = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        clipChildren = false
+        clipToPadding = false
+    }
+
+    private data class TabRow(val destination: MusicDestination, val row: LegacySettingsSwitchRow)
+
+    private val hideableRows = listOf(
+        MusicDestination.Playlist,
+        MusicDestination.CloudMusic,
+        MusicDestination.Artist,
+        MusicDestination.Album,
+        MusicDestination.Songs,
+    ).map { destination ->
+        TabRow(destination, LegacySettingsSwitchRow(context, destination.labelRes))
+    }
+    private val moreRow = LegacySettingsSwitchRow(
+        context = context,
+        titleRes = MusicDestination.More.labelRes,
+        lockedSummaryRes = R.string.bottom_tab_more_locked,
+    )
+
+    init {
+        setBackgroundResource(R.drawable.account_background)
+        isFillViewport = true
+        isVerticalScrollBarEnabled = false
+        overScrollMode = OVER_SCROLL_ALWAYS
+        clipChildren = false
+        clipToPadding = false
+        addView(
+            content,
+            LayoutParams(
+                LayoutParams.MATCH_PARENT,
+                LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        content.addView(gapView(context))
+        content.addView(sectionTitleView(context, R.string.bottom_tab_visibility))
+
+        val allRows = (hideableRows.map { it.row } + moreRow)
+        content.addView(
+            settingsGroup(
+                context,
+                *allRows.mapIndexed { index, row ->
+                    row to when (index) {
+                        0 -> LegacySettingsRowShape.Top
+                        allRows.lastIndex -> LegacySettingsRowShape.Bottom
+                        else -> LegacySettingsRowShape.Middle
+                    }
+                }.toTypedArray(),
+            ),
+        )
+        content.addView(gapView(context))
+    }
+
+    fun bind(
+        hiddenTabs: Set<String>,
+        onTabVisibilityChange: (route: String, visible: Boolean) -> Unit,
+    ) {
+        hideableRows.forEach { (destination, row) ->
+            val visible = destination.route !in hiddenTabs
+            row.bind(checked = visible) { checked ->
+                if (checked) {
+                    // 打开某 tab：增量回调，由 store 在 edit 块内基于存储值移除。
+                    onTabVisibilityChange(destination.route, true)
+                } else {
+                    // 关闭某 tab：若这是最后一个可见的可隐藏 tab，拦截并弹回打开状态，
+                    // 避免开关视觉抖动。store 侧 setTabVisible 还有第二道拦截防线，
+                    // 防止连续快速切换时基于过期快照放过本应拒绝的隐藏。
+                    if (canHideAnyTab(hiddenTabs + destination.route)) {
+                        onTabVisibilityChange(destination.route, false)
+                    } else {
+                        row.setCheckedSilent(true)
+                    }
+                }
+            }
+        }
+        moreRow.bindLocked(checked = true)
+    }
+
+    private fun gapView(context: Context): View {
+        return View(context).apply {
+            setBackgroundColor(Color.TRANSPARENT)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                resources.getDimensionPixelSize(R.dimen.list_item_vertical_gap),
+            )
+        }
+    }
+
+    private fun sectionTitleView(context: Context, textRes: Int): TextView {
+        val margin = context.resources.getDimensionPixelSize(R.dimen.list_item_left_right_margin)
+        return TextView(context).apply {
+            setText(textRes)
+            setTextColor(context.getColor(R.color.setting_item_summary_text_color))
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.settings_item_tips_text_size))
+            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+            setPadding(context.dpPx(18), 0, context.dpPx(18), context.dpPx(7))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                leftMargin = margin
+                rightMargin = margin
+            }
+        }
+    }
+
+    private fun settingsGroup(
+        context: Context,
+        vararg rows: Pair<View, LegacySettingsRowShape>,
+    ): LinearLayout {
+        return LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            clipChildren = false
+            clipToPadding = false
+            rows.forEach { (row, shape) ->
+                row.applyLegacySettingsBackground(shape)
+                addView(row, rowLayoutParams(context))
+            }
+        }
+    }
+
+    private fun rowLayoutParams(context: Context): LinearLayout.LayoutParams {
+        val margin = context.resources.getDimensionPixelSize(R.dimen.list_item_left_right_margin)
+        return LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            context.resources.getDimensionPixelSize(R.dimen.list_item_min_height),
+        ).apply {
+            leftMargin = margin
+            rightMargin = margin
+        }
+    }
+
+    private fun View.applyLegacySettingsBackground(shape: LegacySettingsRowShape) {
+        val target = requireNotNull(context.getDrawable(shape.backgroundRes)).mutate()
+        val shadow = requireNotNull(context.getDrawable(shape.shadowRes)).mutate()
+        val shadowPadding = Rect()
+        shadow.getPadding(shadowPadding)
+        background = ShadowDrawable(
+            shadow = shadow,
+            target = target,
+            insetLeftRight = shadowPadding.left,
+            insetTopBottom = shadowPadding.top,
+        )
     }
 }
 
@@ -1534,6 +1793,7 @@ private class LegacySettingsValueRow(
 private class LegacySettingsSwitchRow(
     context: Context,
     titleRes: Int,
+    private val lockedSummaryRes: Int = 0,
 ) : RelativeLayout(context) {
     private var binding = false
     private var onCheckedChange: ((Boolean) -> Unit)? = null
@@ -1544,6 +1804,18 @@ private class LegacySettingsSwitchRow(
         setText(titleRes)
         setTextColor(context.getColorStateList(R.color.setting_item_text_colorlist))
         setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.primary_text_size))
+        setDuplicateParentStateEnabled(true)
+    }
+    private val summaryView = TextView(context).apply {
+        id = View.generateViewId()
+        gravity = Gravity.CENTER_VERTICAL or Gravity.RIGHT
+        setSingleLine(true)
+        setTextColor(context.getColor(R.color.setting_item_summary_text_color))
+        setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.settings_item_tips_text_size))
+        visibility = if (lockedSummaryRes != 0) VISIBLE else GONE
+        if (lockedSummaryRes != 0) {
+            setText(lockedSummaryRes)
+        }
         setDuplicateParentStateEnabled(true)
     }
     private val switchView = SwitchEx(context).apply {
@@ -1560,6 +1832,7 @@ private class LegacySettingsSwitchRow(
         val contentMarginStart = resources.getDimensionPixelSize(R.dimen.settings_row_content_margin_start)
         val titleAccessoryGap = resources.getDimensionPixelSize(R.dimen.settings_row_title_accessory_gap)
         val accessoryMarginEnd = resources.getDimensionPixelSize(R.dimen.settings_row_accessory_margin_end)
+        val valueArrowGap = resources.getDimensionPixelSize(R.dimen.settings_row_value_arrow_gap)
         setBackgroundResource(R.drawable.group_list_item_bg_single)
         isClickable = true
         isFocusable = true
@@ -1575,13 +1848,30 @@ private class LegacySettingsSwitchRow(
             },
         )
         addView(
+            summaryView,
+            LayoutParams(
+                LayoutParams.WRAP_CONTENT,
+                LayoutParams.WRAP_CONTENT,
+            ).apply {
+                addRule(LEFT_OF, switchView.id)
+                addRule(CENTER_VERTICAL)
+                rightMargin = valueArrowGap
+            },
+        )
+        addView(
             titleView,
             LayoutParams(
                 LayoutParams.MATCH_PARENT,
                 LayoutParams.WRAP_CONTENT,
             ).apply {
                 addRule(CENTER_VERTICAL)
-                addRule(LEFT_OF, switchView.id)
+                // 有摘要（锁定行）时标题在摘要左侧结束；普通开关行标题直接在开关左侧结束，
+                // 避免文字延伸到开关下方被遮挡。
+                if (lockedSummaryRes != 0) {
+                    addRule(LEFT_OF, summaryView.id)
+                } else {
+                    addRule(LEFT_OF, switchView.id)
+                }
                 leftMargin = contentMarginStart
                 rightMargin = titleAccessoryGap
             },
@@ -1596,6 +1886,33 @@ private class LegacySettingsSwitchRow(
         onCheckedChange: (Boolean) -> Unit,
     ) {
         this.onCheckedChange = onCheckedChange
+        if (switchView.isChecked != checked) {
+            binding = true
+            switchView.isChecked = checked
+            binding = false
+        }
+    }
+
+    /**
+     * 静默把开关拨回 [checked]：更新视觉但不触发 [onCheckedChange] 回调。
+     * 用于拦截不允许的关闭操作后把开关弹回打开状态，避免视觉抖动。
+     */
+    fun setCheckedSilent(checked: Boolean) {
+        if (switchView.isChecked != checked) {
+            binding = true
+            switchView.isChecked = checked
+            binding = false
+        }
+    }
+
+    /**
+     * 锁定该行：开关常亮不可切换，常用于不可隐藏的固定项（如「更多」tab）。
+     */
+    fun bindLocked(checked: Boolean) {
+        onCheckedChange = null
+        isClickable = false
+        isFocusable = false
+        switchView.isEnabled = false
         if (switchView.isChecked != checked) {
             binding = true
             switchView.isChecked = checked

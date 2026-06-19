@@ -371,4 +371,12 @@
         <item quantity="one">%1$d song</item>
         <item quantity="other">%1$d songs</item>
     </plurals>
+    <string name="settings_section_navigation">Bottom Navigation</string>
+    <string name="bottom_tab_visibility">Tabs to Show</string>
+    <string name="bottom_tab_more_locked">Always shown</string>
+    <plurals name="bottom_tab_hidden_summary">
+        <item quantity="one">%1$d hidden</item>
+        <item quantity="other">%1$d hidden</item>
+    </plurals>
+    <string name="bottom_tab_all_visible">All shown</string>
 </resources>
