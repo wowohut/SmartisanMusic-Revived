@@ -163,19 +163,24 @@ internal class NeteaseWebLoginActivity : ComponentActivity() {
     }
 
     private fun finishWithPageTransition() {
-        finish()
-        overridePendingTransition(
-            R.anim.legacy_activity_slide_in_from_left,
-            R.anim.legacy_activity_slide_out_to_right,
-        )
+        finishWithCloseTransition()
     }
 
     private fun finishAfterLogin() {
-        finish()
-        overridePendingTransition(
-            R.anim.legacy_activity_slide_in_from_left,
-            R.anim.legacy_activity_slide_out_to_right,
-        )
+        finishWithCloseTransition()
+    }
+
+    private fun finishWithCloseTransition() {
+        val enterAnim = R.anim.legacy_activity_slide_in_from_left
+        val exitAnim = R.anim.legacy_activity_slide_out_to_right
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            overrideActivityTransition(Activity.OVERRIDE_TRANSITION_CLOSE, enterAnim, exitAnim)
+            finish()
+        } else {
+            finish()
+            @Suppress("DEPRECATION")
+            overridePendingTransition(enterAnim, exitAnim)
+        }
     }
 
     private fun handleBackNavigation() {

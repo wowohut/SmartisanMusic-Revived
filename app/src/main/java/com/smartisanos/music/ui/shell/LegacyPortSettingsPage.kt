@@ -2122,7 +2122,7 @@ private class LegacyArtistSeparatorsDialog(
             {
                 input.requestFocus()
                 (dialog.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
-                    ?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+                    ?.showSoftInput(input, 0)
             },
             300L,
         )

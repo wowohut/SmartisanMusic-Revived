@@ -250,7 +250,7 @@ private class LegacyPlaylistNameDialog(
             {
                 editText.requestFocus()
                 (dialog.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
-                    ?.showSoftInput(editText, InputMethodManager.SHOW_IMPLICIT)
+                    ?.showSoftInput(editText, 0)
             },
             300L,
         )

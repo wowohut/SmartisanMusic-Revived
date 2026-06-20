@@ -11,7 +11,9 @@ import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.drawable.BitmapDrawable;
+import android.os.Build;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.Message;
 import android.os.Parcelable;
 import android.util.AttributeSet;
@@ -134,6 +136,7 @@ public class SwitchEx extends CheckBox {
         private final WeakReference<SwitchEx> switchRef;
 
         CheckHandler(SwitchEx switchEx) {
+            super(Looper.getMainLooper());
             switchRef = new WeakReference<>(switchEx);
         }
 
@@ -213,7 +216,7 @@ public class SwitchEx extends CheckBox {
     }
 
     private static Bitmap bitmap(Resources resources, int resId) {
-        return ((BitmapDrawable) resources.getDrawable(resId)).getBitmap();
+        return ((BitmapDrawable) resources.getDrawable(resId, null)).getBitmap();
     }
 
     private static void applySwitchStyle() {
@@ -243,6 +246,21 @@ public class SwitchEx extends CheckBox {
 
     private static boolean isDensityDpiChanged(Resources resources) {
         return cachedBitmapDensityDpi != resources.getConfiguration().densityDpi;
+    }
+
+    private static void setAccessibilityChecked(AccessibilityNodeInfo info, boolean checked) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
+            info.setChecked(checked
+                ? AccessibilityNodeInfo.CHECKED_STATE_TRUE
+                : AccessibilityNodeInfo.CHECKED_STATE_FALSE);
+        } else {
+            setAccessibilityCheckedLegacy(info, checked);
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private static void setAccessibilityCheckedLegacy(AccessibilityNodeInfo info, boolean checked) {
+        info.setChecked(checked);
     }
 
     private static void initBitmap() {
@@ -623,6 +641,6 @@ public class SwitchEx extends CheckBox {
         super.onInitializeAccessibilityNodeInfo(info);
         info.setClassName(SwitchEx.class.getName());
         info.setCheckable(true);
-        info.setChecked(checked);
+        setAccessibilityChecked(info, checked);
     }
 }
