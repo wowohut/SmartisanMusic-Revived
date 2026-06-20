@@ -18,27 +18,33 @@ import com.smartisanos.music.data.online.OnlineLyrics
 import com.smartisanos.music.data.online.OnlineLyricsExtraKey
 import com.smartisanos.music.data.online.OnlineMusicRepositoryRouter
 import com.smartisanos.music.data.online.OnlineTranslatedLyricsExtraKey
+import com.smartisanos.music.data.online.OnlineTranslatedWordLyricsExtraKey
+import com.smartisanos.music.data.online.OnlineWordLyricsExtraKey
+import com.smartisanos.music.data.online.hasContent
 import com.smartisanos.music.data.online.onlineIdentityOrNull
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
-import kotlin.math.max
 
 internal data class EmbeddedLyricsLine(
     val text: String,
     val timestampMs: Long? = null,
+    val translation: String? = null,
+    val tokens: List<EmbeddedLyricsToken> = emptyList(),
+)
+
+internal data class EmbeddedLyricsToken(
+    val text: String,
+    val timestampMs: Long,
+    val endTimestampMs: Long? = null,
 )
 
 internal data class EmbeddedLyrics(
     val lines: List<EmbeddedLyricsLine>,
     val isTimeSynced: Boolean,
-)
-
-private val LrcTimestampRegex = Regex("""\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?]""")
-private val LrcOffsetRegex = Regex("""^\[offset:([+-]?\d+)]$""", RegexOption.IGNORE_CASE)
-private val LrcMetadataRegex = Regex(
-    """^\[(ar|al|ti|by|offset|re|ve|la|length):.*]$""",
-    RegexOption.IGNORE_CASE,
-)
+) {
+    val isWordSynced: Boolean
+        get() = lines.any { line -> line.tokens.isNotEmpty() }
+}
 
 internal fun extractEmbeddedLyrics(tracks: Tracks): EmbeddedLyrics? {
     var bestLyrics: EmbeddedLyrics? = null
@@ -57,21 +63,15 @@ internal suspend fun loadEmbeddedLyrics(
     context: Context,
     mediaItem: MediaItem,
 ): EmbeddedLyrics? {
-    mediaItem.onlineLyricsText()?.let { lyricsText ->
-        parseEmbeddedLyricsText(
-            rawText = lyricsText,
-            hintedByKey = true,
-        )?.let { lyrics -> return lyrics }
+    mediaItem.onlineLyrics()?.let { onlineLyrics ->
+        parseOnlineLyrics(onlineLyrics)?.let { lyrics -> return lyrics }
     }
     val onlineIdentity = mediaItem.onlineIdentityOrNull()
     onlineIdentity?.let { identity ->
         runCatching {
             OnlineMusicRepositoryRouter(context.applicationContext).lyrics(identity)
-        }.getOrNull()?.preferredLyricsText()?.let { lyricsText ->
-            parseEmbeddedLyricsText(
-                rawText = lyricsText,
-                hintedByKey = true,
-            )?.let { lyrics -> return lyrics }
+        }.getOrNull()?.let { onlineLyrics ->
+            parseOnlineLyrics(onlineLyrics)?.let { lyrics -> return lyrics }
         }
     }
     if (onlineIdentity != null) {
@@ -97,15 +97,15 @@ internal suspend fun loadEmbeddedLyrics(
     }.getOrNull()
 }
 
-private fun MediaItem.onlineLyricsText(): String? {
+private fun MediaItem.onlineLyrics(): OnlineLyrics? {
     val extras = mediaMetadata.extras ?: return null
-    return extras.getString(OnlineLyricsExtraKey)?.takeIf(String::isNotBlank)
-        ?: extras.getString(OnlineTranslatedLyricsExtraKey)?.takeIf(String::isNotBlank)
-}
-
-private fun OnlineLyrics.preferredLyricsText(): String? {
-    return lyric?.takeIf(String::isNotBlank)
-        ?: translatedLyric?.takeIf(String::isNotBlank)
+    val lyrics = OnlineLyrics(
+        lyric = extras.getString(OnlineLyricsExtraKey)?.takeIf(String::isNotBlank),
+        translatedLyric = extras.getString(OnlineTranslatedLyricsExtraKey)?.takeIf(String::isNotBlank),
+        wordLyric = extras.getString(OnlineWordLyricsExtraKey)?.takeIf(String::isNotBlank),
+        translatedWordLyric = extras.getString(OnlineTranslatedWordLyricsExtraKey)?.takeIf(String::isNotBlank),
+    )
+    return lyrics.takeIf(OnlineLyrics::hasContent)
 }
 
 internal fun extractEmbeddedLyrics(
@@ -186,124 +186,6 @@ private fun extractEmbeddedLyrics(entry: Metadata.Entry): EmbeddedLyrics? {
 
         else -> null
     }
-}
-
-internal fun parseEmbeddedLyricsText(
-    rawText: String?,
-    hintedByKey: Boolean = false,
-): EmbeddedLyrics? {
-    val normalizedText = normalizeLyricsText(rawText)
-    if (normalizedText.isEmpty()) {
-        return null
-    }
-
-    var offsetMs = 0L
-    val timedLines = mutableListOf<EmbeddedLyricsLine>()
-    val plainLines = mutableListOf<String>()
-
-    normalizedText.lineSequence().forEach { rawLine ->
-        val trimmedLine = rawLine.trim()
-        if (trimmedLine.isEmpty()) {
-            plainLines += ""
-            return@forEach
-        }
-
-        val offsetMatch = LrcOffsetRegex.matchEntire(trimmedLine)
-        if (offsetMatch != null) {
-            offsetMs = offsetMatch.groupValues[1].toLongOrNull() ?: offsetMs
-            return@forEach
-        }
-
-        if (LrcMetadataRegex.matches(trimmedLine)) {
-            return@forEach
-        }
-
-        val timestamps = LrcTimestampRegex.findAll(trimmedLine).toList()
-        if (timestamps.isNotEmpty()) {
-            val lyricText = LrcTimestampRegex.replace(trimmedLine, "").trim()
-            timestamps.forEach { match ->
-                timedLines += EmbeddedLyricsLine(
-                    text = lyricText,
-                    timestampMs = max(0L, parseLrcTimestamp(match) + offsetMs),
-                )
-            }
-            return@forEach
-        }
-
-        plainLines += trimmedLine
-    }
-
-    if (timedLines.isNotEmpty()) {
-        val normalizedTimedLines = normalizeEmbeddedLyricsLines(
-            timedLines.sortedBy { it.timestampMs ?: Long.MAX_VALUE },
-        )
-        if (normalizedTimedLines.isEmpty()) {
-            return null
-        }
-        return EmbeddedLyrics(
-            lines = normalizedTimedLines,
-            isTimeSynced = true,
-        )
-    }
-
-    val normalizedPlainLines = normalizeEmbeddedLyricsLines(
-        plainLines.map { EmbeddedLyricsLine(text = it) },
-    )
-    if (normalizedPlainLines.isEmpty()) {
-        return null
-    }
-
-    if (!hintedByKey && !looksLikeLyricsText(normalizedPlainLines.map { it.text })) {
-        return null
-    }
-
-    return EmbeddedLyrics(
-        lines = normalizedPlainLines,
-        isTimeSynced = false,
-    )
-}
-
-private fun normalizeEmbeddedLyricsLines(
-    lines: List<EmbeddedLyricsLine>,
-): List<EmbeddedLyricsLine> {
-    if (lines.isEmpty()) {
-        return emptyList()
-    }
-
-    val normalizedLines = mutableListOf<EmbeddedLyricsLine>()
-    lines.forEach { line ->
-        val normalizedText = line.text.trim()
-        if (normalizedText.isEmpty()) {
-            if (normalizedLines.isNotEmpty() && normalizedLines.last().text.isNotBlank()) {
-                normalizedLines += line.copy(text = "")
-            }
-        } else {
-            normalizedLines += line.copy(text = normalizedText)
-        }
-    }
-
-    while (normalizedLines.firstOrNull()?.text?.isBlank() == true) {
-        normalizedLines.removeAt(0)
-    }
-    while (normalizedLines.lastOrNull()?.text?.isBlank() == true) {
-        normalizedLines.removeAt(normalizedLines.lastIndex)
-    }
-
-    return normalizedLines
-}
-
-private fun chooseBetterLyrics(
-    current: EmbeddedLyrics?,
-    candidate: EmbeddedLyrics?,
-): EmbeddedLyrics? {
-    candidate ?: return current
-    current ?: return candidate
-
-    if (candidate.isTimeSynced != current.isTimeSynced) {
-        return if (candidate.isTimeSynced) candidate else current
-    }
-
-    return if (candidate.lines.size > current.lines.size) candidate else current
 }
 
 private fun decodeUnsynchronizedLyricsFrame(data: ByteArray): String? {
@@ -412,17 +294,6 @@ private fun charsetForId3Encoding(encoding: Int): Charset? =
         else -> null
     }
 
-private fun normalizeLyricsText(rawText: String?): String {
-    return rawText
-        ?.replace("\uFEFF", "")
-        ?.replace("\u0000", "")
-        ?.replace(Regex("(?i)<br\\s*/?>"), "\n")
-        ?.replace("\r\n", "\n")
-        ?.replace('\r', '\n')
-        ?.trim()
-        .orEmpty()
-}
-
 private fun looksLikeLyricsKey(rawValue: String?): Boolean {
     val normalized = rawValue
         ?.trim()
@@ -447,30 +318,6 @@ private fun looksLikeLyricsKey(rawValue: String?): Boolean {
         normalized == "SYLT" ||
         normalized == "LYRIC" ||
         normalized.contains("LYRICS")
-}
-
-private fun looksLikeLyricsText(lines: List<String>): Boolean {
-    val nonBlankLines = lines.filter { it.isNotBlank() }
-    if (nonBlankLines.isEmpty()) {
-        return false
-    }
-    if (nonBlankLines.size >= 3) {
-        return true
-    }
-    return nonBlankLines.size >= 2 && nonBlankLines.all { it.length <= 48 }
-}
-
-private fun parseLrcTimestamp(match: MatchResult): Long {
-    val minutes = match.groupValues[1].toLongOrNull() ?: 0L
-    val seconds = match.groupValues[2].toLongOrNull() ?: 0L
-    val fraction = match.groupValues.getOrNull(3).orEmpty()
-    val fractionMs = when (fraction.length) {
-        0 -> 0L
-        1 -> fraction.toLong() * 100L
-        2 -> fraction.toLong() * 10L
-        else -> fraction.take(3).toLong()
-    }
-    return (minutes * 60_000L) + (seconds * 1_000L) + fractionMs
 }
 
 private fun readUnsignedInt(data: ByteArray, startIndex: Int): Long {

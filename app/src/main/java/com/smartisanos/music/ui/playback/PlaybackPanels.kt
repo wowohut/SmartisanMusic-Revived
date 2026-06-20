@@ -51,10 +51,14 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
@@ -62,6 +66,7 @@ import androidx.compose.ui.unit.sp
 import androidx.media3.common.Player
 import com.smartisanos.music.R
 import com.smartisanos.music.playback.EmbeddedLyrics
+import com.smartisanos.music.playback.EmbeddedLyricsLine
 import kotlin.math.abs
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filter
@@ -80,6 +85,11 @@ private val PlaybackLyricsPrimaryStyle = TextStyle(
 private val PlaybackLyricsSecondaryStyle = TextStyle(
     fontSize = 15.sp,
     color = Color(0xFF4F5050),
+    textAlign = TextAlign.Center,
+)
+private val PlaybackLyricsTranslationStyle = TextStyle(
+    fontSize = 13.sp,
+    color = Color(0xFF8D8E8E),
     textAlign = TextAlign.Center,
 )
 private val PlaybackMoreActionTitleStyle = TextStyle(
@@ -102,6 +112,7 @@ private val PlaybackMoreActionCancelHeight = 32.dp
 private val PlaybackLyricsHorizontalPadding = 53.6.dp
 private val PlaybackLyricsLineSpacing = 4.dp
 private val PlaybackLyricsRowHeight = 24.dp
+private val PlaybackLyricsTranslatedRowHeight = 42.dp
 private val PlaybackLyricsParagraphGap = 16.dp
 private const val PlaybackLyricsSmoothScrollMaxLineJump = 4
 private const val PlaybackLyricsManualScrollResumeDelayMillis = 2_800L
@@ -214,8 +225,12 @@ internal fun PlaybackLyricsOverlay(
         }
 
         BoxWithConstraints(modifier = modifier) {
-            val centerPadding = remember(maxHeight) {
-                ((maxHeight - PlaybackLyricsRowHeight) / 2f).coerceAtLeast(0.dp)
+            val centerPadding = remember(maxHeight, renderModel) {
+                val focusRowHeight = renderModel.lines
+                    .getOrNull(renderModel.focusIndex)
+                    ?.rowHeight()
+                    ?: PlaybackLyricsRowHeight
+                ((maxHeight - focusRowHeight) / 2f).coerceAtLeast(0.dp)
             }
             val visualCenterIndex by remember(listState, renderModel) {
                 derivedStateOf {
@@ -290,8 +305,8 @@ internal fun PlaybackLyricsOverlay(
             ) {
                 itemsIndexed(
                     items = renderModel.lines,
-                    key = { index, text -> "${renderModel.mode}-$index-$text" },
-                ) { index, text ->
+                    key = { index, line -> "${renderModel.mode}-$index-${line.text}-${line.translation.orEmpty()}" },
+                ) { index, line ->
                     val highlighted = renderModel.highlightedIndex == index
                     val style = if (highlighted) {
                         PlaybackLyricsPrimaryStyle
@@ -302,30 +317,86 @@ internal fun PlaybackLyricsOverlay(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(
-                                if (text.isBlank()) {
-                                    PlaybackLyricsParagraphGap
-                                } else {
-                                    PlaybackLyricsRowHeight
-                                },
+                                line.rowHeight(),
                             ),
                         contentAlignment = Alignment.Center,
                     ) {
-                        if (text.isNotBlank()) {
-                            Text(
-                                text = text,
+                        if (line.text.isNotBlank()) {
+                            PlaybackLyricsLineText(
+                                line = line,
                                 style = style.copy(
                                     color = style.color.copy(
                                         alpha = alphaForDistance(abs(index - visualCenterIndex)),
                                     ),
                                 ),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.fillMaxWidth(),
+                                highlighted = highlighted,
                             )
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun PlaybackLyricsLineText(
+    line: PlaybackLyricsLineRenderModel,
+    style: TextStyle,
+    highlighted: Boolean,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        val text = if (highlighted && line.tokens.isNotEmpty()) {
+            line.toAnnotatedString(
+                activeColor = PlaybackLyricsPrimaryStyle.color.copy(alpha = style.color.alpha),
+                pendingColor = PlaybackLyricsSecondaryStyle.color.copy(alpha = style.color.alpha),
+            )
+        } else {
+            AnnotatedString(line.text)
+        }
+        Text(
+            text = text,
+            style = style,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        line.translation?.takeIf(String::isNotBlank)?.let { translation ->
+            Text(
+                text = translation,
+                style = PlaybackLyricsTranslationStyle.copy(
+                    color = PlaybackLyricsTranslationStyle.color.copy(
+                        alpha = (style.color.alpha * 0.86f).coerceIn(0f, 1f),
+                    ),
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 2.dp),
+            )
+        }
+    }
+}
+
+private fun PlaybackLyricsLineRenderModel.rowHeight(): Dp {
+    return when {
+        text.isBlank() -> PlaybackLyricsParagraphGap
+        !translation.isNullOrBlank() -> PlaybackLyricsTranslatedRowHeight
+        else -> PlaybackLyricsRowHeight
+    }
+}
+
+private fun PlaybackLyricsLineRenderModel.toAnnotatedString(
+    activeColor: Color,
+    pendingColor: Color,
+): AnnotatedString = buildAnnotatedString {
+    tokens.forEach { token ->
+        withStyle(SpanStyle(color = if (token.active) activeColor else pendingColor)) {
+            append(token.text)
         }
     }
 }
@@ -338,10 +409,22 @@ internal enum class PlaybackLyricsMode {
 
 internal data class PlaybackLyricsRenderModel(
     val mode: PlaybackLyricsMode,
-    val lines: List<String>,
+    val lines: List<PlaybackLyricsLineRenderModel>,
     val focusIndex: Int,
     val alphaAnchorIndex: Int,
     val highlightedIndex: Int?,
+)
+
+internal data class PlaybackLyricsLineRenderModel(
+    val text: String,
+    val translation: String? = null,
+    val tokens: List<PlaybackLyricsTokenRenderModel> = emptyList(),
+    val activeTokenIndex: Int? = null,
+)
+
+internal data class PlaybackLyricsTokenRenderModel(
+    val text: String,
+    val active: Boolean,
 )
 
 private class PlaybackLyricsAutoFollowState {
@@ -403,7 +486,7 @@ private fun buildFallbackPlaybackLyricsRenderModel(
         .coerceAtMost(2)
     return PlaybackLyricsRenderModel(
         mode = PlaybackLyricsMode.Fallback,
-        lines = fallbackLines,
+        lines = fallbackLines.map { line -> PlaybackLyricsLineRenderModel(text = line) },
         focusIndex = focusIndex,
         alphaAnchorIndex = focusIndex,
         highlightedIndex = focusIndex,
@@ -419,7 +502,12 @@ private fun buildTimedPlaybackLyricsRenderModel(
     val focusIndex = activeIndex.takeIf { it >= 0 } ?: 0
     return PlaybackLyricsRenderModel(
         mode = PlaybackLyricsMode.Timed,
-        lines = lyrics.lines.map { it.text },
+        lines = lyrics.lines.mapIndexed { index, line ->
+            line.toRenderModel(
+                currentPositionMs = currentPositionMs,
+                includeTokenProgress = index == activeIndex,
+            )
+        },
         focusIndex = focusIndex,
         alphaAnchorIndex = focusIndex,
         highlightedIndex = activeIndex.takeIf { it >= 0 },
@@ -430,11 +518,36 @@ private fun buildStaticPlaybackLyricsRenderModel(
     lyrics: EmbeddedLyrics,
 ): PlaybackLyricsRenderModel = PlaybackLyricsRenderModel(
     mode = PlaybackLyricsMode.Static,
-    lines = lyrics.lines.map { it.text },
+    lines = lyrics.lines.map { line ->
+        line.toRenderModel(currentPositionMs = 0L, includeTokenProgress = false)
+    },
     focusIndex = 0,
     alphaAnchorIndex = 0,
     highlightedIndex = null,
 )
+
+private fun EmbeddedLyricsLine.toRenderModel(
+    currentPositionMs: Long,
+    includeTokenProgress: Boolean,
+): PlaybackLyricsLineRenderModel {
+    val activeTokenIndex = if (includeTokenProgress && tokens.isNotEmpty()) {
+        tokens.indexOfLast { token -> token.timestampMs <= currentPositionMs }
+            .takeIf { index -> index >= 0 }
+    } else {
+        null
+    }
+    return PlaybackLyricsLineRenderModel(
+        text = text,
+        translation = translation,
+        tokens = tokens.mapIndexed { index, token ->
+            PlaybackLyricsTokenRenderModel(
+                text = token.text,
+                active = activeTokenIndex != null && index <= activeTokenIndex,
+            )
+        },
+        activeTokenIndex = activeTokenIndex,
+    )
+}
 
 private fun alphaForDistance(distance: Int): Float =
     when (distance) {

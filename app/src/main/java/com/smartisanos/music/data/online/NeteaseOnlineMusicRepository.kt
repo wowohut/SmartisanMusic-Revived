@@ -203,15 +203,6 @@ internal data class OnlineTrack(
     val mediaId: String = buildOnlineMediaId(source, trackId)
 }
 
-internal data class OnlineLyrics(
-    val lyric: String?,
-    val translatedLyric: String?,
-)
-
-private fun OnlineLyrics.hasContent(): Boolean {
-    return !lyric.isNullOrBlank() || !translatedLyric.isNullOrBlank()
-}
-
 internal data class OnlinePlaybackUrl(
     val url: String,
     val mimeType: String?,
@@ -2029,13 +2020,12 @@ internal class NeteaseCloudMusicClient(
         if (code == 301) {
             return OnlineLyrics(null, null)
         }
-        // 优先普通歌词 lrc；本项目歌词解析器只支持 [mm:ss.xx] 的 LRC 格式，
-        // 不支持 yrc 的 [start,duration](word) 逐字格式，因此 yrc 仅作 lrc 缺失时的兜底。
         return OnlineLyrics(
-            lyric = json.optJSONObject("lrc")?.optNonBlankString("lyric")
-                ?: json.optJSONObject("yrc")?.optNonBlankString("lyric"),
+            lyric = json.optJSONObject("lrc")?.optNonBlankString("lyric"),
             translatedLyric = json.optJSONObject("tlyric")?.optNonBlankString("lyric")
                 ?: json.optJSONObject("ytlrc")?.optNonBlankString("lyric"),
+            wordLyric = json.optJSONObject("yrc")?.optNonBlankString("lyric"),
+            translatedWordLyric = json.optJSONObject("ytlrc")?.optNonBlankString("lyric"),
         )
     }
 
@@ -2685,6 +2675,12 @@ internal fun OnlineTrack.toMediaItem(
         }
         lyrics?.translatedLyric?.takeIf(String::isNotBlank)?.let { translatedLyric ->
             putString(OnlineTranslatedLyricsExtraKey, translatedLyric)
+        }
+        lyrics?.wordLyric?.takeIf(String::isNotBlank)?.let { wordLyric ->
+            putString(OnlineWordLyricsExtraKey, wordLyric)
+        }
+        lyrics?.translatedWordLyric?.takeIf(String::isNotBlank)?.let { translatedWordLyric ->
+            putString(OnlineTranslatedWordLyricsExtraKey, translatedWordLyric)
         }
         if (!playbackUrl.isNullOrBlank()) {
             putLong(OnlinePlaybackResolvedAtExtraKey, System.currentTimeMillis())

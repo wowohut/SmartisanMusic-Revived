@@ -6,6 +6,8 @@ import android.util.LruCache
 import androidx.media3.common.MediaItem
 import com.smartisanos.music.data.online.OnlineLyricsExtraKey
 import com.smartisanos.music.data.online.OnlineTranslatedLyricsExtraKey
+import com.smartisanos.music.data.online.OnlineTranslatedWordLyricsExtraKey
+import com.smartisanos.music.data.online.OnlineWordLyricsExtraKey
 import com.smartisanos.music.data.online.onlineIdentityOrNull
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
@@ -86,12 +88,16 @@ private data class LyricsRequestKey(
     val mediaUri: String?,
     val onlineLyricsHash: Int?,
     val onlineTranslatedLyricsHash: Int?,
+    val onlineWordLyricsHash: Int?,
+    val onlineTranslatedWordLyricsHash: Int?,
 )
 
 private fun MediaItem.lyricsRequestKey(): LyricsRequestKey {
     val extras = mediaMetadata.extras
     val lyrics = extras?.getString(OnlineLyricsExtraKey)
     val translatedLyrics = extras?.getString(OnlineTranslatedLyricsExtraKey)
+    val wordLyrics = extras?.getString(OnlineWordLyricsExtraKey)
+    val translatedWordLyrics = extras?.getString(OnlineTranslatedWordLyricsExtraKey)
     val onlineIdentity = onlineIdentityOrNull()
     return LyricsRequestKey(
         mediaId = mediaId.trim().takeIf(String::isNotEmpty),
@@ -100,6 +106,8 @@ private fun MediaItem.lyricsRequestKey(): LyricsRequestKey {
         mediaUri = if (onlineIdentity == null) localConfiguration?.uri?.toString() else null,
         onlineLyricsHash = lyrics?.hashCode(),
         onlineTranslatedLyricsHash = translatedLyrics?.hashCode(),
+        onlineWordLyricsHash = wordLyrics?.hashCode(),
+        onlineTranslatedWordLyricsHash = translatedWordLyrics?.hashCode(),
     )
 }
 

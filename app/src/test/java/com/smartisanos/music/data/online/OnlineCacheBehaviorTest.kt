@@ -139,6 +139,8 @@ class OnlineCacheBehaviorTest {
                 lyrics = OnlineLyrics(
                     lyric = "[00:01.00]第一句",
                     translatedLyric = "Translated",
+                    wordLyric = "[1000,500](1000,250,0)第一(1250,250,0)句",
+                    translatedWordLyric = "[1000,500](1000,500,0)Translated",
                 ),
             )
 
@@ -146,6 +148,8 @@ class OnlineCacheBehaviorTest {
                 OnlineLyrics(
                     lyric = "[00:01.00]第一句",
                     translatedLyric = "Translated",
+                    wordLyric = "[1000,500](1000,250,0)第一(1250,250,0)句",
+                    translatedWordLyric = "[1000,500](1000,500,0)Translated",
                 ),
                 cache.get(identity),
             )

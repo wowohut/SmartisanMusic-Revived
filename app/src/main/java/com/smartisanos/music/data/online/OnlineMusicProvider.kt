@@ -19,8 +19,24 @@ internal const val OnlineSourceExtraKey = "com.smartisanos.music.extra.ONLINE_SO
 internal const val OnlineTrackIdExtraKey = "com.smartisanos.music.extra.ONLINE_TRACK_ID"
 internal const val OnlineLyricsExtraKey = "com.smartisanos.music.extra.ONLINE_LYRICS"
 internal const val OnlineTranslatedLyricsExtraKey = "com.smartisanos.music.extra.ONLINE_TRANSLATED_LYRICS"
+internal const val OnlineWordLyricsExtraKey = "com.smartisanos.music.extra.ONLINE_WORD_LYRICS"
+internal const val OnlineTranslatedWordLyricsExtraKey = "com.smartisanos.music.extra.ONLINE_TRANSLATED_WORD_LYRICS"
 internal const val OnlinePlaybackResolvedAtExtraKey = "com.smartisanos.music.extra.ONLINE_PLAYBACK_RESOLVED_AT"
 internal const val OnlinePlaybackUriScheme = "smartisan-online"
+
+internal data class OnlineLyrics(
+    val lyric: String?,
+    val translatedLyric: String?,
+    val wordLyric: String? = null,
+    val translatedWordLyric: String? = null,
+)
+
+internal fun OnlineLyrics.hasContent(): Boolean {
+    return !lyric.isNullOrBlank() ||
+        !translatedLyric.isNullOrBlank() ||
+        !wordLyric.isNullOrBlank() ||
+        !translatedWordLyric.isNullOrBlank()
+}
 
 internal data class OnlineAccountPlaylist(
     val provider: OnlineMusicProvider,

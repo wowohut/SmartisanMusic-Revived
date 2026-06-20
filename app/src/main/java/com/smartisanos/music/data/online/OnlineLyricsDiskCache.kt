@@ -42,6 +42,8 @@ internal class OnlineLyricsDiskCache(
             OnlineLyrics(
                 lyric = root.optNullableString(LyricKey),
                 translatedLyric = root.optNullableString(TranslatedLyricKey),
+                wordLyric = root.optNullableString(WordLyricKey),
+                translatedWordLyric = root.optNullableString(TranslatedWordLyricKey),
             )
         }
     }
@@ -65,6 +67,8 @@ internal class OnlineLyricsDiskCache(
                     .put(CachedAtMsKey, System.currentTimeMillis())
                     .putNullable(LyricKey, lyrics.lyric)
                     .putNullable(TranslatedLyricKey, lyrics.translatedLyric)
+                    .putNullable(WordLyricKey, lyrics.wordLyric)
+                    .putNullable(TranslatedWordLyricKey, lyrics.translatedWordLyric)
                 runCatching {
                     tempFile.writeText(root.toString())
                     if (!tempFile.renameTo(file)) {
@@ -109,11 +113,9 @@ internal class OnlineLyricsDiskCache(
         const val CachedAtMsKey = "cachedAtMs"
         const val LyricKey = "lyric"
         const val TranslatedLyricKey = "translatedLyric"
+        const val WordLyricKey = "wordLyric"
+        const val TranslatedWordLyricKey = "translatedWordLyric"
     }
-}
-
-private fun OnlineLyrics.hasContent(): Boolean {
-    return !lyric.isNullOrBlank() || !translatedLyric.isNullOrBlank()
 }
 
 private fun JSONObject.putNullable(
