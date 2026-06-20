@@ -8,12 +8,17 @@ import androidx.media3.common.Player
 internal data class PlaybackScreenState(
     val mediaItem: MediaItem? = null,
     val isPlaying: Boolean = false,
+    val playWhenReady: Boolean = false,
+    val isBuffering: Boolean = false,
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
     val shuffleEnabled: Boolean = false,
     val currentPositionMs: Long = 0L,
     val durationMs: Long = 0L,
     val volume: Float = 1f,
-)
+) {
+    val isPlaybackActive: Boolean
+        get() = isPlaying || (playWhenReady && isBuffering)
+}
 
 internal enum class PlaybackVisualPage {
     Cover,

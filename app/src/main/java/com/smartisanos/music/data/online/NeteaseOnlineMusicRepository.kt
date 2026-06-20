@@ -10,12 +10,16 @@ import com.smartisanos.music.data.settings.OnlineMusicSettingsStore
 import com.smartisanos.music.data.settings.fallbackCandidates
 import com.smartisanos.music.playback.LocalAudioLibrary
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -34,6 +38,7 @@ private const val NeteaseDetailCacheTtlMs = 10 * 60 * 1000L
 private const val NeteaseAccountCacheTtlMs = 2 * 60 * 1000L
 private const val NeteaseSearchCacheTtlMs = 5 * 60 * 1000L
 private const val NeteaseLyricsCacheTtlMs = 7L * 24L * 60L * 60L * 1000L
+private const val NeteaseEmptyLyricsCacheTtlMs = 5L * 60L * 1000L
 private const val SearchLimit = 30
 private const val ArtistSearchLimit = 30
 private const val AlbumSearchLimit = 30
@@ -70,8 +75,10 @@ private const val UserAgent =
     "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
 
-private object NeteaseOnlineMemoryCache {
+internal object NeteaseOnlineMemoryCache {
     private val entries = ConcurrentHashMap<String, CacheEntry>()
+    private val inFlightLoads = ConcurrentHashMap<String, Deferred<Any?>>()
+    private val loadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @Suppress("UNCHECKED_CAST")
     fun <T> getFreshValue(
@@ -110,13 +117,62 @@ private object NeteaseOnlineMemoryCache {
         loader: suspend () -> T,
     ): T {
         getFreshValue<T>(key, ttlMs)?.let { cached -> return cached.value }
-        val value = loader()
-        put(key, value)
-        return value
+        return loadCoalesced(key) {
+            val value = loader()
+            put(key, value)
+            value
+        }
+    }
+
+    suspend fun <T : Any> getOrLoadNonNull(
+        key: String,
+        ttlMs: Long,
+        loader: suspend () -> T?,
+    ): T? {
+        getFresh<T>(key, ttlMs)?.let { cached -> return cached }
+        return loadCoalesced(key) {
+            loader()?.also { value -> put(key, value) }
+        }
+    }
+
+    suspend fun <T> coalesceLoad(
+        key: String,
+        loader: suspend () -> T,
+    ): T {
+        return loadCoalesced(key, loader)
+    }
+
+    private suspend fun <T> loadCoalesced(
+        key: String,
+        loader: suspend () -> T,
+    ): T {
+        val newLoad = loadScope.async(start = CoroutineStart.LAZY) {
+            loader() as Any?
+        }
+        val activeLoad = inFlightLoads.putIfAbsent(key, newLoad)
+        val load = activeLoad ?: newLoad.also { pendingLoad ->
+            pendingLoad.invokeOnCompletion {
+                inFlightLoads.remove(key, pendingLoad)
+            }
+            pendingLoad.start()
+        }
+        if (activeLoad != null) {
+            newLoad.cancel()
+        }
+        @Suppress("UNCHECKED_CAST")
+        return load.await() as T
     }
 
     fun invalidate(prefix: String) {
         entries.keys.removeIf { key -> key.startsWith(prefix) }
+        inFlightLoads.entries.removeIf { entry ->
+            if (entry.key.startsWith(prefix)) {
+                entry.value.cancel()
+                true
+            } else {
+                false
+            }
+        }
     }
 
     private data class CacheEntry(
@@ -151,6 +207,10 @@ internal data class OnlineLyrics(
     val lyric: String?,
     val translatedLyric: String?,
 )
+
+private fun OnlineLyrics.hasContent(): Boolean {
+    return !lyric.isNullOrBlank() || !translatedLyric.isNullOrBlank()
+}
 
 internal data class OnlinePlaybackUrl(
     val url: String,
@@ -227,7 +287,7 @@ internal enum class NeteasePlaylistTrackOperation(val apiValue: String) {
 
 internal class NeteaseOnlineMusicRepository(
     private val authStore: NeteaseAuthStore? = null,
-    playbackQualityProvider: suspend () -> NeteaseAudioQuality = { NeteaseAudioQuality.ExHigh },
+    private val playbackQualityProvider: suspend () -> NeteaseAudioQuality = { NeteaseAudioQuality.ExHigh },
     private val client: NeteaseCloudMusicClient = NeteaseCloudMusicClient(
         cookieProvider = { authStore?.getCookies().orEmpty() },
         playbackQualityProvider = playbackQualityProvider,
@@ -238,6 +298,10 @@ internal class NeteaseOnlineMusicRepository(
 ) : OnlineMusicProviderRepository {
 
     override val provider: OnlineMusicProvider = OnlineMusicProvider.Netease
+    private val mutableCacheRefreshEvents = MutableSharedFlow<OnlineCacheRefreshEvent>(
+        extraBufferCapacity = 32,
+    )
+    override val cacheRefreshEvents: SharedFlow<OnlineCacheRefreshEvent> = mutableCacheRefreshEvents
     private val refreshingPageCacheKeys = ConcurrentHashMap.newKeySet<String>()
 
     constructor(context: Context) : this(
@@ -320,15 +384,37 @@ internal class NeteaseOnlineMusicRepository(
             }
             return diskEntry.value
         }
+        return NeteaseOnlineMemoryCache.getOrLoad(
+            key = key,
+            ttlMs = ttlMs,
+        ) {
+            loader().also { value ->
+                val loadedAtMs = System.currentTimeMillis()
+                pageDiskCache?.put(
+                    key = key,
+                    value = value,
+                    codec = codec,
+                    cachedAtMs = loadedAtMs,
+                )
+            }
+        }
+    }
+
+    private suspend fun <T : Any> loadAndPersistNullablePage(
+        key: String,
+        codec: OnlinePageCacheCodec<T>,
+        loader: suspend () -> T?,
+    ): T? {
         return loader().also { value ->
             val loadedAtMs = System.currentTimeMillis()
-            NeteaseOnlineMemoryCache.put(key, value, loadedAtMs)
-            pageDiskCache?.put(
-                key = key,
-                value = value,
-                codec = codec,
-                cachedAtMs = loadedAtMs,
-            )
+            if (value != null) {
+                pageDiskCache?.put(
+                    key = key,
+                    value = value,
+                    codec = codec,
+                    cachedAtMs = loadedAtMs,
+                )
+            }
         }
     }
 
@@ -358,16 +444,16 @@ internal class NeteaseOnlineMusicRepository(
             }
             return diskEntry.value
         }
-        val value = loader()
-        NeteaseOnlineMemoryCache.put(key, value)
-        if (value != null) {
-            pageDiskCache?.put(
+        return NeteaseOnlineMemoryCache.getOrLoad(
+            key = key,
+            ttlMs = ttlMs,
+        ) {
+            loadAndPersistNullablePage(
                 key = key,
-                value = value,
                 codec = codec,
+                loader = loader,
             )
         }
-        return value
     }
 
     private fun <T : Any> refreshPageCacheInBackground(
@@ -380,11 +466,12 @@ internal class NeteaseOnlineMusicRepository(
         if (!refreshingPageCacheKeys.add(key)) {
             return
         }
+        emitCacheRefreshEvent(key, OnlineCacheRefreshEventKind.Started)
         scope.launch {
-            runCatching {
+            try {
                 val value = loader()
                 if (!shouldCache(value)) {
-                    return@runCatching
+                    return@launch
                 }
                 val loadedAtMs = System.currentTimeMillis()
                 NeteaseOnlineMemoryCache.put(key, value, loadedAtMs)
@@ -394,8 +481,14 @@ internal class NeteaseOnlineMusicRepository(
                     codec = codec,
                     cachedAtMs = loadedAtMs,
                 )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                // Keep serving stale cache if a background refresh fails.
+            } finally {
+                refreshingPageCacheKeys.remove(key)
+                emitCacheRefreshEvent(key, OnlineCacheRefreshEventKind.Finished)
             }
-            refreshingPageCacheKeys.remove(key)
         }
     }
 
@@ -408,8 +501,9 @@ internal class NeteaseOnlineMusicRepository(
         if (!refreshingPageCacheKeys.add(key)) {
             return
         }
+        emitCacheRefreshEvent(key, OnlineCacheRefreshEventKind.Started)
         scope.launch {
-            runCatching {
+            try {
                 val value = loader()
                 val loadedAtMs = System.currentTimeMillis()
                 NeteaseOnlineMemoryCache.put(key, value, loadedAtMs)
@@ -421,9 +515,28 @@ internal class NeteaseOnlineMusicRepository(
                         cachedAtMs = loadedAtMs,
                     )
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                // Keep serving stale cache if a background refresh fails.
+            } finally {
+                refreshingPageCacheKeys.remove(key)
+                emitCacheRefreshEvent(key, OnlineCacheRefreshEventKind.Finished)
             }
-            refreshingPageCacheKeys.remove(key)
         }
+    }
+
+    private fun emitCacheRefreshEvent(
+        key: String,
+        kind: OnlineCacheRefreshEventKind,
+    ) {
+        mutableCacheRefreshEvents.tryEmit(
+            OnlineCacheRefreshEvent(
+                provider = provider,
+                cacheKey = key,
+                kind = kind,
+            ),
+        )
     }
 
     override suspend fun search(query: String): List<OnlineTrack> {
@@ -460,19 +573,21 @@ internal class NeteaseOnlineMusicRepository(
             }
             return diskEntry.value
         }
-        val results = performSearch(normalizedQuery)
-        // 仅缓存有结果的成功响应；空结果可能是瞬时风控，缓存它会让用户 5 分钟内持续看到空。
-        if (results.hasResults) {
-            val loadedAtMs = System.currentTimeMillis()
-            NeteaseOnlineMemoryCache.put(key, results, loadedAtMs)
-            pageDiskCache?.put(
-                key = key,
-                value = results,
-                codec = OnlinePageCacheCodecs.SearchResults,
-                cachedAtMs = loadedAtMs,
-            )
+        return NeteaseOnlineMemoryCache.coalesceLoad("$key:cold") {
+            val results = performSearch(normalizedQuery)
+            // 仅缓存有结果的成功响应；空结果可能是瞬时风控，缓存它会让用户 5 分钟内持续看到空。
+            if (results.hasResults) {
+                val loadedAtMs = System.currentTimeMillis()
+                NeteaseOnlineMemoryCache.put(key, results, loadedAtMs)
+                pageDiskCache?.put(
+                    key = key,
+                    value = results,
+                    codec = OnlinePageCacheCodecs.SearchResults,
+                    cachedAtMs = loadedAtMs,
+                )
+            }
+            results
         }
-        return results
     }
 
     /**
@@ -1176,15 +1291,13 @@ internal class NeteaseOnlineMusicRepository(
     suspend fun resolvePlayableTrack(
         track: OnlineTrack,
         includeLyrics: Boolean = true,
+        forceRefresh: Boolean = false,
     ): MediaItem? {
         if (track.source != NeteaseSourceId) {
             return null
         }
         val identity = OnlineTrackIdentity(source = track.source, trackId = track.trackId)
-        val playbackUrl = client.getPlaybackUrl(
-            trackId = track.trackId,
-            originalDurationMs = track.durationMs,
-        ) ?: return null
+        val playbackUrl = cachedPlaybackResult(track, forceRefresh).playbackUrl ?: return null
         val lyrics = if (includeLyrics) {
             runCatching { cachedLyrics(identity) }.getOrNull()
         } else {
@@ -1197,26 +1310,116 @@ internal class NeteaseOnlineMusicRepository(
         )
     }
 
-    private suspend fun cachedLyrics(identity: OnlineTrackIdentity): OnlineLyrics {
-        return NeteaseOnlineMemoryCache.getOrLoad(
-            key = cacheKey("lyrics", identity.trackId),
-            ttlMs = NeteaseLyricsCacheTtlMs,
-        ) {
-            lyricsDiskCache?.get(identity)
-                ?: client.getLyrics(identity.trackId).also { lyrics ->
-                    lyricsDiskCache?.put(identity, lyrics)
-                }
+    private suspend fun cachedPlaybackResult(
+        track: OnlineTrack,
+        forceRefresh: Boolean,
+    ): NeteasePlaybackParseResult {
+        val requestedQuality = playbackQualityProvider()
+        val key = cacheKey(
+            "playback-url",
+            track.trackId,
+            requestedQuality.preferenceValue,
+        )
+        if (!forceRefresh) {
+            NeteaseOnlineMemoryCache.getFresh<OnlinePlaybackUrl>(
+                key = key,
+                ttlMs = OnlinePlaybackUrlMaxAgeMs,
+            )?.let { playbackUrl ->
+                return NeteasePlaybackParseResult(
+                    status = NeteasePlaybackParseStatus.Success,
+                    playbackUrl = playbackUrl,
+                )
+            }
+        }
+        val resultKey = if (forceRefresh) "$key:result:force" else "$key:result"
+        val result = NeteaseOnlineMemoryCache.coalesceLoad(resultKey) {
+            client.getPlaybackUrlResult(
+                trackId = track.trackId,
+                originalDurationMs = track.durationMs,
+                requestedQuality = requestedQuality,
+            )
+        }
+        result.playbackUrl?.let { playbackUrl ->
+            NeteaseOnlineMemoryCache.put(key, playbackUrl)
+        }
+        return result
+    }
+
+    suspend fun resolvePlaybackUri(identity: OnlineTrackIdentity): Uri {
+        if (identity.source != NeteaseSourceId) {
+            throw OnlinePlaybackResolutionException(
+                reason = OnlinePlaybackFailureReason.Unavailable,
+                message = "Unsupported online source ${identity.source}",
+            )
+        }
+        val track = getTrack(identity.trackId) ?: throw OnlinePlaybackResolutionException(
+            reason = OnlinePlaybackFailureReason.Unavailable,
+            message = "Online track ${identity.source}/${identity.trackId} is unavailable",
+        )
+        val result = cachedPlaybackResult(track, forceRefresh = false)
+        val playbackUrl = result.playbackUrl ?: throw OnlinePlaybackResolutionException(
+            reason = result.status.toOnlinePlaybackFailureReason(),
+            message = "Unable to resolve online playback uri for ${identity.source}/${identity.trackId}: ${result.status}",
+        )
+        return Uri.parse(playbackUrl.url)
+    }
+
+    private fun NeteasePlaybackParseStatus.toOnlinePlaybackFailureReason(): OnlinePlaybackFailureReason {
+        return when (this) {
+            NeteasePlaybackParseStatus.Preview -> OnlinePlaybackFailureReason.PreviewOnly
+            NeteasePlaybackParseStatus.RequiresLogin -> OnlinePlaybackFailureReason.LoginRequired
+            NeteasePlaybackParseStatus.Success,
+            NeteasePlaybackParseStatus.Unavailable -> OnlinePlaybackFailureReason.Unavailable
         }
     }
 
-    override suspend fun resolvePlayableMediaItem(mediaItem: MediaItem): MediaItem? {
+    private suspend fun cachedLyrics(identity: OnlineTrackIdentity): OnlineLyrics {
+        val lyricsKey = cacheKey("lyrics", identity.trackId)
+        NeteaseOnlineMemoryCache.getFresh<OnlineLyrics>(
+            key = lyricsKey,
+            ttlMs = NeteaseLyricsCacheTtlMs,
+        )?.let { lyrics -> return lyrics }
+        val emptyLyricsKey = cacheKey("lyrics-empty", identity.trackId)
+        NeteaseOnlineMemoryCache.getFresh<Boolean>(
+            key = emptyLyricsKey,
+            ttlMs = NeteaseEmptyLyricsCacheTtlMs,
+        )?.let {
+            return OnlineLyrics(lyric = null, translatedLyric = null)
+        }
+
+        lyricsDiskCache?.get(identity)
+            ?.takeIf(OnlineLyrics::hasContent)
+            ?.let { lyrics ->
+                NeteaseOnlineMemoryCache.put(lyricsKey, lyrics)
+                return lyrics
+            }
+
+        return client.getLyrics(identity.trackId).also { lyrics ->
+            if (lyrics.hasContent()) {
+                NeteaseOnlineMemoryCache.put(lyricsKey, lyrics)
+                lyricsDiskCache?.put(identity, lyrics)
+            } else {
+                NeteaseOnlineMemoryCache.put(emptyLyricsKey, true)
+            }
+        }
+    }
+
+    override suspend fun resolvePlayableMediaItem(
+        mediaItem: MediaItem,
+        includeLyrics: Boolean,
+        forceRefresh: Boolean,
+    ): MediaItem? {
         val identity = mediaItem.onlineIdentityOrNull() ?: return null
         if (identity.source != NeteaseSourceId) {
             return null
         }
         val fallbackTrack = mediaItem.toOnlineTrackFallback(identity)
         val track = fallbackTrack ?: getTrack(identity.trackId) ?: return null
-        return resolvePlayableTrack(track)
+        return resolvePlayableTrack(
+            track = track,
+            includeLyrics = includeLyrics,
+            forceRefresh = forceRefresh,
+        )
     }
 
     override suspend fun resolvePlayableMediaItems(
@@ -1728,11 +1931,27 @@ internal class NeteaseCloudMusicClient(
     suspend fun getPlaybackUrl(
         trackId: String,
         originalDurationMs: Long = 0L,
-    ): OnlinePlaybackUrl? = withContext(Dispatchers.IO) {
-        val id = trackId.trim().takeIf(String::isNotEmpty) ?: return@withContext null
+        requestedQuality: NeteaseAudioQuality? = null,
+    ): OnlinePlaybackUrl? {
+        return getPlaybackUrlResult(
+            trackId = trackId,
+            originalDurationMs = originalDurationMs,
+            requestedQuality = requestedQuality,
+        ).playbackUrl
+    }
+
+    suspend fun getPlaybackUrlResult(
+        trackId: String,
+        originalDurationMs: Long = 0L,
+        requestedQuality: NeteaseAudioQuality? = null,
+    ): NeteasePlaybackParseResult = withContext(Dispatchers.IO) {
+        val id = trackId.trim().takeIf(String::isNotEmpty)
+            ?: return@withContext NeteasePlaybackParseResult(NeteasePlaybackParseStatus.Unavailable)
         val idsJson = "[$id]"
         var restrictedPlaybackReturned = false
-        for (quality in playbackQualityProvider().fallbackCandidates()) {
+        var previewPlaybackReturned = false
+        val targetQuality = requestedQuality ?: playbackQualityProvider()
+        for (quality in targetQuality.fallbackCandidates()) {
             val eapiResult = requestPlaybackUrlWithSessionRetry(originalDurationMs) {
                 callEApi(
                     path = "/song/enhance/player/url/v1",
@@ -1744,17 +1963,30 @@ internal class NeteaseCloudMusicClient(
                 )
             }
             when (eapiResult.status) {
-                NeteasePlaybackParseStatus.Success -> return@withContext eapiResult.playbackUrl
-                NeteasePlaybackParseStatus.Preview,
+                NeteasePlaybackParseStatus.Success -> return@withContext eapiResult
+                NeteasePlaybackParseStatus.Preview -> {
+                    restrictedPlaybackReturned = true
+                    previewPlaybackReturned = true
+                }
                 NeteasePlaybackParseStatus.RequiresLogin -> restrictedPlaybackReturned = true
                 NeteasePlaybackParseStatus.Unavailable -> Unit
             }
         }
-        if (restrictedPlaybackReturned || hasLogin()) {
-            null
-        } else {
-            resolveOuterPlaybackUrl(id)
+        if (!restrictedPlaybackReturned && !hasLogin()) {
+            resolveOuterPlaybackUrl(id)?.let { playbackUrl ->
+                return@withContext NeteasePlaybackParseResult(
+                    status = NeteasePlaybackParseStatus.Success,
+                    playbackUrl = playbackUrl,
+                )
+            }
         }
+        NeteasePlaybackParseResult(
+            status = when {
+                previewPlaybackReturned -> NeteasePlaybackParseStatus.Preview
+                restrictedPlaybackReturned -> NeteasePlaybackParseStatus.RequiresLogin
+                else -> NeteasePlaybackParseStatus.Unavailable
+            },
+        )
     }
 
     suspend fun getLyrics(trackId: String): OnlineLyrics = withContext(Dispatchers.IO) {

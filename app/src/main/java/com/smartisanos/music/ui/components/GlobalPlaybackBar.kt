@@ -26,8 +26,8 @@ import com.smartisanos.music.data.online.onlineIdentityOrNull
 import com.smartisanos.music.isExternalAudioLaunchItem
 import com.smartisanos.music.playback.LocalPlaybackController
 import com.smartisanos.music.playback.artworkRequestKey
-import com.smartisanos.music.ui.shell.playback.LegacyPlaybackBarSnapshot
 import com.smartisanos.music.ui.shell.playback.LegacyPortPlaybackBar
+import com.smartisanos.music.ui.shell.playback.legacyPlaybackBarSnapshot
 import com.smartisanos.music.ui.shell.playback.loadLegacyArtworkBitmap
 import com.smartisanos.music.ui.shell.playback.peekLegacyArtworkBitmap
 import kotlinx.coroutines.launch
@@ -48,21 +48,13 @@ fun GlobalPlaybackBar(
     val favoriteIds by favoriteRepository.observeFavoriteIds().collectAsState(initial = emptySet())
     val scope = rememberCoroutineScope()
     var snapshot by remember(controller) {
-        mutableStateOf(
-            LegacyPlaybackBarSnapshot(
-                mediaItem = controller.currentMediaItem,
-                isPlaying = controller.isPlaying,
-            ),
-        )
+        mutableStateOf(controller.legacyPlaybackBarSnapshot())
     }
 
     DisposableEffect(controller) {
         val listener = object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
-                snapshot = LegacyPlaybackBarSnapshot(
-                    mediaItem = player.currentMediaItem,
-                    isPlaying = player.isPlaying,
-                )
+                snapshot = player.legacyPlaybackBarSnapshot()
             }
         }
         controller.addListener(listener)
@@ -135,7 +127,7 @@ fun GlobalPlaybackBar(
             controller.seekToPrevious()
         },
         onPlayPause = {
-            if (controller.isPlaying) {
+            if (snapshot.isPlaybackActive) {
                 controller.pause()
             } else {
                 controller.play()

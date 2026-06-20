@@ -49,6 +49,7 @@ import com.smartisanos.music.R
 import com.smartisanos.music.data.favorite.FavoriteSongRecord
 import com.smartisanos.music.playback.LocalAudioLibrary
 import com.smartisanos.music.playback.LocalPlaybackBrowser
+import com.smartisanos.music.playback.isPlaybackActiveForUi
 import com.smartisanos.music.playback.replaceQueueAndPlay
 import com.smartisanos.music.playback.replaceQueueAndPlayShuffled
 import com.smartisanos.music.ui.loved.LovedSongEntry
@@ -260,7 +261,7 @@ internal fun LegacyPortLovedSongsPage(
                     val contentChanged = adapter.updateEntries(
                         nextEntries = sortedEntries,
                         nextCurrentMediaId = browser?.currentMediaItem?.mediaId,
-                        nextCurrentIsPlaying = browser?.isPlaying == true,
+                        nextCurrentIsPlaying = browser.isPlaybackActiveForUi(),
                         nextEditMode = editMode,
                         nextSelectedMediaIds = selectedMediaIds,
                     )
@@ -282,7 +283,7 @@ internal fun LegacyPortLovedSongsPage(
                                 override fun onEvents(player: Player, events: Player.Events) {
                                     adapter.setPlaybackState(
                                         nextCurrentMediaId = player.currentMediaItem?.mediaId,
-                                        nextCurrentIsPlaying = player.isPlaying,
+                                        nextCurrentIsPlaying = player.isPlaybackActiveForUi(),
                                     )
                                     adapter.updateVisiblePlaybackState(listView)
                                 }

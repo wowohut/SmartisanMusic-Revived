@@ -27,6 +27,7 @@ import androidx.media3.common.Player
 import com.smartisanos.music.R
 import com.smartisanos.music.data.playlist.UserPlaylistDetail
 import com.smartisanos.music.playback.LocalAudioLibrary
+import com.smartisanos.music.playback.isPlaybackActiveForUi
 import com.smartisanos.music.ui.widgets.CustomCheckBox
 import com.smartisanos.music.ui.widgets.EditableListViewItem
 import com.smartisanos.music.ui.widgets.StretchTextView
@@ -68,7 +69,7 @@ internal fun LegacyPlaylistDetailPage(
                 editMode = editMode,
                 selectedTrackIds = selectedTrackIds,
                 currentMediaId = browser?.currentMediaItem?.mediaId,
-                currentIsPlaying = browser?.isPlaying == true,
+                currentIsPlaying = browser.isPlaybackActiveForUi(),
                 onShuffle = onShuffle,
                 onDeletePlaylist = onDeletePlaylist,
                 onEditModeChange = onEditModeChange,
@@ -227,7 +228,7 @@ private class LegacyPlaylistDetailRootView(context: Context) : LinearLayout(cont
                     override fun onEvents(player: Player, events: Player.Events) {
                         trackAdapter.setPlaybackState(
                             nextCurrentMediaId = player.currentMediaItem?.mediaId,
-                            nextCurrentIsPlaying = player.isPlaying,
+                            nextCurrentIsPlaying = player.isPlaybackActiveForUi(),
                         )
                         trackAdapter.updateVisiblePlaybackState(listView)
                     }

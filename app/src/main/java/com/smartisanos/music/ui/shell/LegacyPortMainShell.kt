@@ -2,8 +2,9 @@ package com.smartisanos.music.ui.shell
 
 import android.app.Activity
 import android.content.ContentUris
-import android.net.Uri
 import android.graphics.Bitmap
+import android.net.Uri
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.view.View
 import android.widget.Toast
@@ -50,10 +51,13 @@ import com.smartisanos.music.data.library.LibraryExclusions
 import com.smartisanos.music.data.library.LibraryExclusionsStore
 import com.smartisanos.music.data.online.NeteaseAccountActionStatus
 import com.smartisanos.music.data.online.OnlineAccountPlaylist
+import com.smartisanos.music.data.online.OnlinePlaybackFailureReason
 import com.smartisanos.music.data.online.OnlineMusicRepositoryRouter
 import com.smartisanos.music.data.online.OnlineMusicProvider
 import com.smartisanos.music.data.online.isOnlineMediaItem
+import com.smartisanos.music.data.online.onlinePlaybackFailureReasonOrNull
 import com.smartisanos.music.data.online.onlineIdentityOrNull
+import com.smartisanos.music.data.online.withOnlinePlaybackPlaceholderUri
 import com.smartisanos.music.data.playlist.PlaylistCreateResult
 import com.smartisanos.music.data.playlist.PlaylistRepository
 import com.smartisanos.music.data.playlist.UserPlaylistSummary
@@ -89,6 +93,7 @@ import com.smartisanos.music.ui.shell.dialogs.LegacySongDeleteConfirmOverlay
 import com.smartisanos.music.ui.shell.library.rememberLegacyLibraryMediaState
 import com.smartisanos.music.ui.shell.playback.LegacyPlaybackBarSnapshot
 import com.smartisanos.music.ui.shell.playback.LegacyPortPlaybackBar
+import com.smartisanos.music.ui.shell.playback.legacyPlaybackBarSnapshot
 import com.smartisanos.music.ui.shell.playback.loadLegacyArtworkBitmap
 import com.smartisanos.music.ui.shell.playback.peekLegacyArtworkBitmap
 import com.smartisanos.music.ui.shell.playback.toExternalAudioMediaItem
@@ -221,12 +226,7 @@ private fun LegacyPortMainShellContent(
     var playbackPlaylistCreateTarget by remember { mutableStateOf(LegacyPlaybackPlaylistCreateTarget.Local) }
     var ratingOverrides by remember { mutableStateOf(emptyMap<String, Int>()) }
     var snapshot by remember(controller) {
-        mutableStateOf(
-            LegacyPlaybackBarSnapshot(
-                mediaItem = controller?.currentMediaItem,
-                isPlaying = controller?.isPlaying == true,
-            ),
-        )
+        mutableStateOf(controller.legacyPlaybackBarSnapshot())
     }
     var playbackBarContentSnapshot by remember(controller) {
         mutableStateOf(snapshot)
@@ -258,6 +258,10 @@ private fun LegacyPortMainShellContent(
     val playbackBarRequestedVisible = snapshot.mediaItem != null
     val playbackBarHeight = 67.dp
     var playbackBarComposed by remember { mutableStateOf(false) }
+    var lastOnlinePlaybackErrorToastKey by remember {
+        mutableStateOf<OnlinePlaybackErrorToastKey?>(null)
+    }
+    var lastOnlinePlaybackErrorToastAtMs by remember { mutableStateOf(0L) }
     val openSearchOverlay = {
         libraryLoadRequested = true
         searchQuery = ""
@@ -292,10 +296,7 @@ private fun LegacyPortMainShellContent(
         }
         val listener = object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
-                val nextSnapshot = LegacyPlaybackBarSnapshot(
-                    mediaItem = player.currentMediaItem,
-                    isPlaying = player.isPlaying,
-                )
+                val nextSnapshot = player.legacyPlaybackBarSnapshot()
                 snapshot = nextSnapshot
                 if (nextSnapshot.mediaItem != null) {
                     playbackBarContentSnapshot = nextSnapshot
@@ -305,15 +306,33 @@ private fun LegacyPortMainShellContent(
             override fun onPlayerError(error: PlaybackException) {
                 val failedItem = controller.currentMediaItem
                 if (failedItem?.isOnlineMediaItem() == true) {
-                    Toast.makeText(context, R.string.online_music_play_failed, Toast.LENGTH_SHORT).show()
+                    val reason = error.onlinePlaybackFailureReasonOrNull()
+                    val toastKey = OnlinePlaybackErrorToastKey(
+                        mediaId = failedItem.mediaId,
+                        reason = reason,
+                    )
+                    val nowMs = SystemClock.elapsedRealtime()
+                    if (!shouldShowOnlinePlaybackErrorToast(
+                            lastKey = lastOnlinePlaybackErrorToastKey,
+                            lastAtMs = lastOnlinePlaybackErrorToastAtMs,
+                            nextKey = toastKey,
+                            nowMs = nowMs,
+                        )
+                    ) {
+                        return
+                    }
+                    lastOnlinePlaybackErrorToastKey = toastKey
+                    lastOnlinePlaybackErrorToastAtMs = nowMs
+                    Toast.makeText(
+                        context,
+                        onlinePlaybackErrorMessageRes(reason),
+                        Toast.LENGTH_SHORT,
+                    ).show()
                 }
             }
         }
         controller.addListener(listener)
-        val initialSnapshot = LegacyPlaybackBarSnapshot(
-            mediaItem = controller.currentMediaItem,
-            isPlaying = controller.isPlaying,
-        )
+        val initialSnapshot = controller.legacyPlaybackBarSnapshot()
         snapshot = initialSnapshot
         if (initialSnapshot.mediaItem != null) {
             playbackBarContentSnapshot = initialSnapshot
@@ -370,28 +389,14 @@ private fun LegacyPortMainShellContent(
     }
 
     fun enqueueMediaItems(items: List<MediaItem>) {
-        if (items.none(MediaItem::isOnlineMediaItem)) {
-            enqueueResolvedMediaItems(items)
-            return
-        }
-        scope.launch {
-            val resolvedItems = withContext(Dispatchers.IO) {
-                items.mapNotNull { item ->
-                    when {
-                        !item.isOnlineMediaItem() -> item
-                        item.localConfiguration?.uri != null -> item
-                        else -> runCatching {
-                            onlineMusicRepository.resolvePlayableMediaItem(item)
-                        }.getOrNull()
-                    }
-                }
+        val queueItems = items.map { item ->
+            if (item.isOnlineMediaItem()) {
+                item.withOnlinePlaybackPlaceholderUri()
+            } else {
+                item
             }
-            if (resolvedItems.isEmpty()) {
-                Toast.makeText(context, R.string.online_music_play_failed, Toast.LENGTH_SHORT).show()
-                return@launch
-            }
-            enqueueResolvedMediaItems(resolvedItems)
         }
+        enqueueResolvedMediaItems(queueItems)
     }
 
     fun requestAddToPlaylist(items: List<MediaItem>) {
@@ -964,8 +969,8 @@ private fun LegacyPortMainShellContent(
                             controller?.seekToPrevious()
                         },
                         onPlayPause = {
-                            if (controller?.isPlaying == true) {
-                                controller.pause()
+                            if (snapshot.isPlaybackActive) {
+                                controller?.pause()
                             } else {
                                 controller?.play()
                             }
@@ -1338,6 +1343,32 @@ private fun LegacyPortMainShellContent(
         }
     }
 }
+
+internal data class OnlinePlaybackErrorToastKey(
+    val mediaId: String,
+    val reason: OnlinePlaybackFailureReason?,
+)
+
+internal fun shouldShowOnlinePlaybackErrorToast(
+    lastKey: OnlinePlaybackErrorToastKey?,
+    lastAtMs: Long,
+    nextKey: OnlinePlaybackErrorToastKey,
+    nowMs: Long,
+    cooldownMs: Long = OnlinePlaybackErrorToastCooldownMs,
+): Boolean {
+    return lastKey != nextKey || nowMs - lastAtMs >= cooldownMs
+}
+
+private fun onlinePlaybackErrorMessageRes(reason: OnlinePlaybackFailureReason?): Int {
+    return when (reason) {
+        OnlinePlaybackFailureReason.LoginRequired -> R.string.online_music_play_login_required
+        OnlinePlaybackFailureReason.PreviewOnly -> R.string.online_music_play_preview_only
+        OnlinePlaybackFailureReason.Unavailable,
+        null -> R.string.online_music_play_failed
+    }
+}
+
+private const val OnlinePlaybackErrorToastCooldownMs = 3_500L
 
 private fun String.toLegacyMediaStoreDeleteUri(): Uri? {
     val mediaStoreId = trim().toLongOrNull() ?: return null

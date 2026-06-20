@@ -36,6 +36,7 @@ import androidx.media3.common.Player
 import com.smartisanos.music.R
 import com.smartisanos.music.data.settings.ArtistSettings
 import com.smartisanos.music.playback.LocalPlaybackBrowser
+import com.smartisanos.music.playback.isPlaybackActiveForUi
 import com.smartisanos.music.playback.replaceQueueAndPlay
 import com.smartisanos.music.playback.replaceQueueAndPlayShuffled
 import com.smartisanos.music.ui.album.AlbumSummary
@@ -549,7 +550,7 @@ private fun LegacyPortArtistAllSongsPage(
             val contentChanged = adapter.updateItems(
                 nextItems = sortedSongs,
                 nextCurrentMediaId = browser?.currentMediaItem?.mediaId,
-                nextCurrentIsPlaying = browser?.isPlaying == true,
+                nextCurrentIsPlaying = browser.isPlaybackActiveForUi(),
                 nextShowTrackArtists = true,
                 nextArtistSettings = artistSettings,
                 nextForceSequentialTrackNumbers = true,
@@ -615,7 +616,12 @@ private class LegacyArtistAllSongsRoot(context: Context) : FrameLayout(context) 
         }
         val listener = object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
-                if (adapter.setPlaybackState(player.currentMediaItem?.mediaId, player.isPlaying)) {
+                if (
+                    adapter.setPlaybackState(
+                        player.currentMediaItem?.mediaId,
+                        player.isPlaybackActiveForUi(),
+                    )
+                ) {
                     adapter.updateVisibleRows(listView)
                 }
             }

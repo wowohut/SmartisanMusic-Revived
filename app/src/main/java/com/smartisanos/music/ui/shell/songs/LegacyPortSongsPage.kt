@@ -24,6 +24,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import com.smartisanos.music.R
 import com.smartisanos.music.playback.LocalPlaybackBrowser
+import com.smartisanos.music.playback.isPlaybackActiveForUi
 import com.smartisanos.music.playback.replaceQueueAndPlay
 import com.smartisanos.music.playback.replaceQueueAndPlayShuffled
 import com.smartisanos.music.ui.shell.LegacySlideSelectionStartArea
@@ -153,7 +154,7 @@ internal fun LegacyPortSongsPage(
             val listContentChanged = adapter.updateItems(
                 nextItems = sortedSongs,
                 nextCurrentMediaId = browser?.currentMediaItem?.mediaId,
-                nextCurrentIsPlaying = browser?.isPlaying == true,
+                nextCurrentIsPlaying = browser.isPlaybackActiveForUi(),
                 nextDisplayMode = sortDisplayMode,
                 nextSectionMode = sortDisplayMode.toSectionMode(),
                 nextQuickBarCollapsedVisibleWidth = if (showQuickBar) quickBar?.collapsedVisibleWidth ?: 0 else 0,
@@ -177,7 +178,7 @@ internal fun LegacyPortSongsPage(
                         override fun onEvents(player: Player, events: Player.Events) {
                             adapter.setPlaybackState(
                                 nextCurrentMediaId = player.currentMediaItem?.mediaId,
-                                nextCurrentIsPlaying = player.isPlaying,
+                                nextCurrentIsPlaying = player.isPlaybackActiveForUi(),
                             )
                             adapter.updateVisiblePlaybackState(listView)
                         }

@@ -135,6 +135,7 @@
     <string name="cloud_music_account_playlists_loading">Loading my music</string>
     <string name="cloud_music_account_playlists_error">My music is unavailable</string>
     <string name="cloud_music_featured_loading">Loading Cloud Music</string>
+    <string name="cloud_music_cache_refreshing">Showing cached content, updating</string>
     <string name="cloud_music_featured_error">Cloud Music is unavailable</string>
     <string name="cloud_music_loading">Searching</string>
     <string name="cloud_music_no_result">No results</string>
@@ -247,6 +248,8 @@
     <string name="netease_playlist_edit_action">Edit playlist</string>
     <string name="netease_playlist_delete_single_confirm">Delete this playlist?</string>
     <string name="online_music_play_failed">Cannot play this online track.</string>
+    <string name="online_music_play_login_required">Log in to NetEase Cloud Music to play this track.</string>
+    <string name="online_music_play_preview_only">Only a preview clip is available. Check account access.</string>
     <string name="search_no_result">No results</string>
     <string name="search_no_result_subtitle">No matching songs, albums, or artists found</string>
     <string name="library_root">Local Music</string>
@@ -341,6 +344,7 @@
     <string name="artist_custom_separator_hint">Custom</string>
     <string name="popcorn_sound_tips">Simulates worn vinyl during playback with rain-like crackle noise</string>
     <string name="playback_more_primary_line">No lyrics</string>
+    <string name="playback_buffering">Buffering</string>
     <string name="setting_stop_time">Set sleep timer</string>
     <string name="time_no">None</string>
     <string name="time_15m">15 minutes</string>

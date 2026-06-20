@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.util.Size
 import androidx.media3.common.MediaItem
+import com.smartisanos.music.data.online.onlineIdentityOrNull
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -24,11 +25,37 @@ internal data class ArtworkRequestKey(
 
 internal fun MediaItem.artworkRequestKey(): ArtworkRequestKey {
     val artworkData = mediaMetadata.artworkData
-    return ArtworkRequestKey(
+    val onlineIdentity = onlineIdentityOrNull()
+    return artworkRequestKeyState(
         mediaId = mediaId,
         artworkUri = mediaMetadata.artworkUri?.toString(),
         albumId = mediaMetadata.extras.albumId(),
         mediaUri = localConfiguration?.uri?.toString(),
+        artworkData = artworkData,
+        onlineSource = onlineIdentity?.source,
+        onlineTrackId = onlineIdentity?.trackId,
+    )
+}
+
+internal fun artworkRequestKeyState(
+    mediaId: String?,
+    artworkUri: String?,
+    albumId: Long?,
+    mediaUri: String?,
+    artworkData: ByteArray?,
+    onlineSource: String?,
+    onlineTrackId: String?,
+): ArtworkRequestKey {
+    val onlineArtworkMediaId = if (!onlineSource.isNullOrBlank() && !onlineTrackId.isNullOrBlank()) {
+        "online:$onlineSource:$onlineTrackId"
+    } else {
+        null
+    }
+    return ArtworkRequestKey(
+        mediaId = onlineArtworkMediaId ?: mediaId,
+        artworkUri = artworkUri,
+        albumId = albumId,
+        mediaUri = if (onlineArtworkMediaId == null) mediaUri else null,
         artworkDataHash = artworkData?.contentHashCode(),
         artworkDataSize = artworkData?.size,
     )

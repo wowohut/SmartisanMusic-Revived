@@ -52,6 +52,10 @@ internal class OnlineLyricsDiskCache(
     ) {
         withContext(Dispatchers.IO) {
             synchronized(lock) {
+                if (!lyrics.hasContent()) {
+                    identity.cacheFile().delete()
+                    return@synchronized
+                }
                 if (!directory.exists() && !directory.mkdirs()) {
                     return@synchronized
                 }
@@ -106,6 +110,10 @@ internal class OnlineLyricsDiskCache(
         const val LyricKey = "lyric"
         const val TranslatedLyricKey = "translatedLyric"
     }
+}
+
+private fun OnlineLyrics.hasContent(): Boolean {
+    return !lyric.isNullOrBlank() || !translatedLyric.isNullOrBlank()
 }
 
 private fun JSONObject.putNullable(

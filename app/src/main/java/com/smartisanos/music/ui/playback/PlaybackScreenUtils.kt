@@ -23,6 +23,8 @@ internal fun Player?.snapshot(volume: Float = 1f): PlaybackScreenState {
     return PlaybackScreenState(
         mediaItem = player.currentMediaItem,
         isPlaying = player.isPlaying,
+        playWhenReady = player.playWhenReady,
+        isBuffering = player.playbackState == Player.STATE_BUFFERING,
         repeatMode = player.repeatMode,
         shuffleEnabled = player.shuffleModeEnabled,
         currentPositionMs = player.currentPosition.coerceAtLeast(0L),

@@ -64,6 +64,7 @@ import com.smartisanos.music.R
 import com.smartisanos.music.data.favorite.FavoriteSongsRepository
 import com.smartisanos.music.data.online.NeteaseAuthState
 import com.smartisanos.music.data.online.NeteaseAuthStore
+import com.smartisanos.music.data.online.OnlineCacheRefreshEventKind
 import com.smartisanos.music.data.online.OnlineAccountPlaylist
 import com.smartisanos.music.data.online.OnlineAlbum
 import com.smartisanos.music.data.online.OnlineArtist
@@ -142,6 +143,7 @@ internal fun LegacyPortCloudMusicPage(
     var searchActive by rememberSaveable { mutableStateOf(false) }
     var artistListAuthRevision by remember { mutableStateOf(-1) }
     var radioHomeAuthRevision by remember { mutableStateOf(-1) }
+    var refreshingCachedPageKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     val artistScrollKey = currentRoute.artistScrollKey() ?: selectedArtist?.artistId.orEmpty()
     val onlinePlaylistScrollKey = currentRoute.onlinePlaylistScrollKey() ?: selectedOnlinePlaylist?.playlistId.orEmpty()
@@ -212,6 +214,16 @@ internal fun LegacyPortCloudMusicPage(
             if (latestAuthState != authState) {
                 authState = latestAuthState
                 authRevision += 1
+            }
+        }
+    }
+
+    LaunchedEffect(activeRepository) {
+        refreshingCachedPageKeys = emptySet()
+        activeRepository.cacheRefreshEvents.collect { event ->
+            refreshingCachedPageKeys = when (event.kind) {
+                OnlineCacheRefreshEventKind.Started -> refreshingCachedPageKeys + event.cacheKey
+                OnlineCacheRefreshEventKind.Finished -> refreshingCachedPageKeys - event.cacheKey
             }
         }
     }
@@ -987,6 +999,18 @@ internal fun LegacyPortCloudMusicPage(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
+                AnimatedVisibility(
+                    visible = active && refreshingCachedPageKeys.isNotEmpty(),
+                    enter = expandVertically(animationSpec = tween(180, easing = FastOutSlowInEasing)) +
+                        fadeIn(animationSpec = tween(140)),
+                    exit = shrinkVertically(animationSpec = tween(160, easing = FastOutSlowInEasing)) +
+                        fadeOut(animationSpec = tween(120)),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    CloudMusicCacheRefreshNotice(
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1219,7 +1243,6 @@ internal fun LegacyPortCloudMusicPage(
                                             selectedCategory = searchCategory,
                                             onCategoryChange = { category -> searchCategory = category },
                                             repository = activeRepository,
-                                            authLoggedIn = authState.isLoggedIn,
                                             active = active,
                                             playbackBarOverlayHeight = playbackBarOverlayHeight,
                                             onRetryClick = { authRevision += 1 },
@@ -1397,6 +1420,41 @@ internal fun LegacyPortCloudMusicPage(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun CloudMusicCacheRefreshNotice(
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.background(ComposeColor.White)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(28.dp)
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .background(
+                        color = CloudAccentColor.copy(alpha = 0.72f),
+                        shape = RoundedCornerShape(3.dp),
+                    ),
+            )
+            Text(
+                text = stringResource(R.string.cloud_music_cache_refreshing),
+                style = TextStyle(
+                    fontSize = 12.sp,
+                    color = ComposeColor(0x99000000),
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
+        CloudMusicDivider()
     }
 }
 

@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import android.util.Size
+import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.BitmapLoader
 import com.google.common.util.concurrent.ListenableFuture
@@ -14,6 +15,7 @@ import com.google.common.util.concurrent.ListeningExecutorService
 import com.google.common.util.concurrent.MoreExecutors
 import java.io.IOException
 import java.util.concurrent.Executors
+import kotlinx.coroutines.runBlocking
 
 internal class MediaSessionArtworkBitmapLoader(
     context: Context,
@@ -47,26 +49,28 @@ internal class MediaSessionArtworkBitmapLoader(
         val artworkUri = metadata.artworkUri
         val mediaId = artworkUri?.mediaStoreAlbumArtMediaId()
             ?: metadata.extras.mediaId()
-        if (mediaId != null) {
-            return executor.submit<Bitmap> {
-                val mediaUri = localAudioMediaUri(mediaId)
-                loadEmbeddedArtworkBitmap(appContext, mediaUri, NotificationArtworkSize)
-                    ?: loadArtworkUriBitmap(appContext, artworkUri, NotificationArtworkSize)
-                    ?: loadAlbumArtworkFromMetadata(metadata.extras)
-                    ?: throw IOException("Unable to load notification artwork for mediaId=$mediaId.")
-            }
+        if (mediaId == null && artworkUri == null && metadata.extras.albumArtworkUri() == null) {
+            return null
         }
-
-        if (artworkUri != null) {
-            return executor.submit<Bitmap> {
-                loadArtworkUriBitmap(appContext, artworkUri, NotificationArtworkSize)
-                    ?: loadAlbumArtworkFromMetadata(metadata.extras)
-                    ?: throw IOException("Unable to load notification artwork: $artworkUri")
-            }
+        return executor.submit<Bitmap> {
+            val mediaItem = MediaItem.Builder()
+                .setMediaId(mediaId.orEmpty())
+                .setMediaMetadata(metadata)
+                .apply {
+                    mediaId
+                        ?.let(::localAudioMediaUri)
+                        ?.let(::setUri)
+                }
+                .build()
+            runBlocking {
+                NowPlayingArtworkRepository.load(
+                    context = appContext,
+                    mediaItem = mediaItem,
+                    size = NotificationArtworkSize,
+                )
+            } ?: loadAlbumArtworkFromMetadata(metadata.extras)
+                ?: throw IOException("Unable to load notification artwork.")
         }
-
-        val albumArtwork = metadata.extras.albumArtworkUri()
-        return albumArtwork?.let(::loadBitmap)
     }
 
     fun shutdown() {

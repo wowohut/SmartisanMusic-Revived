@@ -1,6 +1,7 @@
 package com.smartisanos.music.data.online
 
 import android.content.Context
+import android.net.Uri
 import androidx.media3.common.MediaItem
 
 internal class OnlineMusicRepositoryRouter(
@@ -15,11 +16,19 @@ internal class OnlineMusicRepositoryRouter(
         }
     }
 
-    suspend fun resolvePlayableMediaItem(mediaItem: MediaItem): MediaItem? {
+    suspend fun resolvePlayableMediaItem(
+        mediaItem: MediaItem,
+        includeLyrics: Boolean = true,
+        forceRefresh: Boolean = false,
+    ): MediaItem? {
         val identity = mediaItem.onlineIdentityOrNull() ?: return null
         return when (identity.source) {
             OnlineMusicProvider.Netease.sourceId ->
-                neteaseRepository.resolvePlayableMediaItem(mediaItem)
+                neteaseRepository.resolvePlayableMediaItem(
+                    mediaItem = mediaItem,
+                    includeLyrics = includeLyrics,
+                    forceRefresh = forceRefresh,
+                )
             else -> null
         }
     }
@@ -32,6 +41,16 @@ internal class OnlineMusicRepositoryRouter(
             mediaItems = mediaItems,
             includeLyrics = includeLyrics,
         )
+    }
+
+    suspend fun resolvePlaybackUri(identity: OnlineTrackIdentity): Uri {
+        return when (identity.source) {
+            OnlineMusicProvider.Netease.sourceId -> neteaseRepository.resolvePlaybackUri(identity)
+            else -> throw OnlinePlaybackResolutionException(
+                reason = OnlinePlaybackFailureReason.Unavailable,
+                message = "Unsupported online source ${identity.source}",
+            )
+        }
     }
 
     suspend fun resolvePlayableItems(

@@ -36,6 +36,7 @@ import androidx.media3.common.Player
 import com.smartisanos.music.R
 import com.smartisanos.music.data.settings.ArtistSettings
 import com.smartisanos.music.playback.LocalPlaybackBrowser
+import com.smartisanos.music.playback.isPlaybackActiveForUi
 import com.smartisanos.music.playback.replaceQueueAndPlay
 import com.smartisanos.music.playback.replaceQueueAndPlayShuffled
 import com.smartisanos.music.ui.album.AlbumSummary
@@ -62,7 +63,7 @@ internal fun LegacyPortAlbumDetailPage(
         mutableStateOf(browser?.currentMediaItem?.mediaId)
     }
     var currentIsPlaying by remember(browser) {
-        mutableStateOf(browser?.isPlaying == true)
+        mutableStateOf(browser.isPlaybackActiveForUi())
     }
     var artworkBrowserState by remember {
         mutableStateOf<LegacyAlbumArtworkBrowserState?>(null)
@@ -77,7 +78,7 @@ internal fun LegacyPortAlbumDetailPage(
         val listener = object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
                 currentMediaId = player.currentMediaItem?.mediaId
-                currentIsPlaying = player.isPlaying
+                currentIsPlaying = player.isPlaybackActiveForUi()
             }
         }
         playbackBrowser.addListener(listener)

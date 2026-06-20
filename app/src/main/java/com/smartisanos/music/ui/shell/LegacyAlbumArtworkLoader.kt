@@ -9,6 +9,7 @@ import android.util.LruCache
 import android.util.Size
 import android.widget.ImageView
 import androidx.media3.common.MediaItem
+import com.smartisanos.music.data.online.onlineIdentityOrNull
 import com.smartisanos.music.R
 import com.smartisanos.music.playback.LocalAudioLibrary
 import com.smartisanos.music.playback.loadArtworkUriBitmap
@@ -219,6 +220,7 @@ internal class LegacyAlbumArtworkLoader(context: Context) {
             artworkData = artworkData,
             viewTag = albumId?.let { resolvedAlbumId -> "album:$resolvedAlbumId" }
                 ?: mediaId?.let { resolvedMediaId -> "track:$resolvedMediaId" }
+                ?: representative.onlineArtworkViewTag()
                 ?: album.id,
             sizePx = sizePx,
         )
@@ -250,6 +252,7 @@ internal class LegacyAlbumArtworkLoader(context: Context) {
             artworkData = artworkData,
             viewTag = albumId?.let { resolvedAlbumId -> "album:$resolvedAlbumId" }
                 ?: mediaId?.let { resolvedMediaId -> "track:$resolvedMediaId" }
+                ?: mediaItem.onlineArtworkViewTag()
                 ?: mediaItem.localConfiguration?.uri?.toString()
                 ?: mediaItem.mediaId,
             sizePx = sizePx,
@@ -267,6 +270,12 @@ internal class LegacyAlbumArtworkLoader(context: Context) {
             }
         }
     }
+}
+
+private fun MediaItem.onlineArtworkViewTag(): String? {
+    val identity = onlineIdentityOrNull() ?: return null
+    val artworkUri = mediaMetadata.artworkUri?.toString().orEmpty()
+    return "online:${identity.source}:${identity.trackId}:$artworkUri"
 }
 
 private data class LegacyAlbumArtworkRequest(

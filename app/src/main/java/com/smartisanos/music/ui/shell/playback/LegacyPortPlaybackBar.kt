@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import com.smartisanos.music.R
 import com.smartisanos.music.isExternalAudioLaunchItem
 import com.smartisanos.music.playback.NowPlayingArtworkRepository
@@ -67,7 +68,25 @@ internal fun LegacyPortPlaybackBar(
 internal data class LegacyPlaybackBarSnapshot(
     val mediaItem: MediaItem? = null,
     val isPlaying: Boolean = false,
-)
+    val playWhenReady: Boolean = false,
+    val isBuffering: Boolean = false,
+) {
+    val isPlaybackActive: Boolean
+        get() = isPlaying || (playWhenReady && isBuffering)
+
+    val isPlaybackBuffering: Boolean
+        get() = playWhenReady && isBuffering
+}
+
+internal fun Player?.legacyPlaybackBarSnapshot(): LegacyPlaybackBarSnapshot {
+    val player = this ?: return LegacyPlaybackBarSnapshot()
+    return LegacyPlaybackBarSnapshot(
+        mediaItem = player.currentMediaItem,
+        isPlaying = player.isPlaying,
+        playWhenReady = player.playWhenReady,
+        isBuffering = player.playbackState == Player.STATE_BUFFERING,
+    )
+}
 
 internal suspend fun loadLegacyArtworkBitmap(
     context: android.content.Context,
@@ -129,9 +148,14 @@ private class LegacyPlaybackBarHostView(context: Context) : FrameLayout(context)
         val artist = mediaItem.mediaMetadata.subtitle?.toString()
             ?: mediaItem.mediaMetadata.artist?.toString()
             ?: context.getString(R.string.unknown_artist)
+        val subtitle = if (snapshot.isPlaybackBuffering) {
+            context.getString(R.string.playback_buffering)
+        } else {
+            artist
+        }
 
         playbackBar.findViewById<TextView>(R.id.track_name)?.text = title
-        playbackBar.findViewById<TextView>(R.id.artist_name)?.text = artist
+        playbackBar.findViewById<TextView>(R.id.artist_name)?.text = subtitle
         playbackBar.findViewById<ImageButton>(R.id.left_btn)?.apply {
             setImageResource(
                 if (isFavorite) {
@@ -151,7 +175,7 @@ private class LegacyPlaybackBarHostView(context: Context) : FrameLayout(context)
         }
         playbackBar.findViewById<ImageButton>(R.id.play_btn)?.apply {
             setImageResource(
-                if (snapshot.isPlaying) {
+                if (snapshot.isPlaybackActive) {
                     R.drawable.float_btn_pause_selector
                 } else {
                     R.drawable.float_btn_play_selector

@@ -65,7 +65,9 @@ import com.smartisanos.music.data.online.OnlineMusicProviderRepository
 import com.smartisanos.music.data.online.OnlineTrack
 import com.smartisanos.music.data.online.onlineIdentityOrNull
 import com.smartisanos.music.data.online.toMediaItem
+import com.smartisanos.music.data.online.withOnlinePlaybackPlaceholderUri
 import com.smartisanos.music.playback.LocalPlaybackBrowser
+import com.smartisanos.music.playback.isPlaybackActiveForUi
 import com.smartisanos.music.playback.replaceQueueAndPlay
 import com.smartisanos.music.ui.shell.LegacyPlaylistDeleteDialog
 import com.smartisanos.music.ui.shell.LegacyPlaylistDeleteRequest
@@ -84,7 +86,6 @@ import com.smartisanos.music.ui.shell.songs.LegacySongsSectionMode
 import com.smartisanos.music.ui.shell.songs.LegacySongsSortDisplayMode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.random.Random
@@ -310,10 +311,6 @@ internal fun CloudMusicStateContent(
         is CloudMusicState.Success -> CloudMusicResultList(
             tracks = state.tracks,
             repository = repository,
-            playFailedMessageRes = when {
-                !authLoggedIn -> R.string.cloud_music_login_in_settings
-                else -> R.string.netease_online_music_play_failed
-            },
             active = active,
             playbackBarOverlayHeight = playbackBarOverlayHeight,
             onTrackMoreClick = onTrackMoreClick,
@@ -331,7 +328,6 @@ internal fun CloudMusicStateContent(
 internal fun CloudMusicResultList(
     tracks: List<OnlineTrack>,
     repository: OnlineMusicProviderRepository,
-    playFailedMessageRes: Int,
     active: Boolean,
     playbackBarOverlayHeight: Dp,
     onTrackMoreClick: (MediaItem) -> Unit,
@@ -345,8 +341,6 @@ internal fun CloudMusicResultList(
     val context = LocalContext.current
     val browser = LocalPlaybackBrowser.current
     val scope = rememberCoroutineScope()
-    var queuePopulateJob by remember { mutableStateOf<Job?>(null) }
-    var queuePopulateToken by remember { mutableStateOf(0L) }
     var editMode by remember { mutableStateOf(false) }
     var selectedMediaIds by remember { mutableStateOf(emptySet<String>()) }
     var deleteRequest by remember { mutableStateOf<LegacyPlaylistDeleteRequest?>(null) }
@@ -376,10 +370,6 @@ internal fun CloudMusicResultList(
         selectedMediaIds = emptySet()
     }
 
-    fun showPlayFailed() {
-        Toast.makeText(context, playFailedMessageRes, Toast.LENGTH_SHORT).show()
-    }
-
     fun updateSelection(mediaId: String, selected: Boolean) {
         selectedMediaIds = if (selected) {
             selectedMediaIds + mediaId
@@ -391,41 +381,16 @@ internal fun CloudMusicResultList(
     fun playCloudQueueFromIndex(
         startIndex: Int,
         shuffle: Boolean = false,
-        onResolveFailed: (() -> Unit)? = null,
     ) {
         if (mediaItems.isEmpty()) {
             return
         }
         val safeStartIndex = startIndex.coerceIn(0, mediaItems.lastIndex)
-        val requestToken = queuePopulateToken + 1L
-        queuePopulateToken = requestToken
-        queuePopulateJob?.cancel()
-        queuePopulateJob = scope.launch {
-            val startItem = withContext(Dispatchers.IO) {
-                runCatching {
-                    repository.resolvePlayableMediaItems(
-                        mediaItems = listOf(mediaItems[safeStartIndex]),
-                        includeLyrics = true,
-                    ).firstOrNull()
-                }.getOrNull()
-            }
-            if (queuePopulateToken != requestToken) {
-                return@launch
-            }
-            if (startItem == null) {
-                onResolveFailed?.invoke()
-                showPlayFailed()
-                return@launch
-            }
-            val queueItems = mediaItems.toMutableList().apply {
-                this[safeStartIndex] = startItem
-            }
-            browser.replaceQueueAndPlay(
-                mediaItems = queueItems,
-                startIndex = safeStartIndex,
-                shuffleModeEnabled = shuffle,
-            )
-        }
+        browser.replaceQueueAndPlay(
+            mediaItems = mediaItems.map(MediaItem::withOnlinePlaybackPlaceholderUri),
+            startIndex = safeStartIndex,
+            shuffleModeEnabled = shuffle,
+        )
     }
 
     fun removeSelectedFromAccountPlaylist() {
@@ -637,13 +602,6 @@ internal fun CloudMusicResultList(
                 }.takeIf { index -> index >= 0 } ?: 0
                 playCloudQueueFromIndex(
                     startIndex = startIndex,
-                    onResolveFailed = {
-                        adapter.setPlaybackState(
-                            nextCurrentMediaId = browser?.currentMediaItem?.mediaId,
-                            nextCurrentIsPlaying = browser?.isPlaying == true,
-                        )
-                        adapter.updateVisiblePlaybackState(listView)
-                    },
                 )
             },
             modifier = modifier,
@@ -672,13 +630,6 @@ internal fun CloudMusicResultList(
                 }.takeIf { index -> index >= 0 } ?: 0
                 playCloudQueueFromIndex(
                     startIndex = startIndex,
-                    onResolveFailed = {
-                        adapter.setPlaybackState(
-                            nextCurrentMediaId = browser?.currentMediaItem?.mediaId,
-                            nextCurrentIsPlaying = browser?.isPlaying == true,
-                        )
-                        adapter.updateVisiblePlaybackState(listView)
-                    },
                 )
             },
             modifier = Modifier
@@ -770,7 +721,7 @@ private fun CloudMusicResultListView(
             val listContentChanged = adapter.updateItems(
                 nextItems = mediaItems,
                 nextCurrentMediaId = browser?.currentMediaItem?.mediaId,
-                nextCurrentIsPlaying = browser?.isPlaying == true,
+                nextCurrentIsPlaying = browser.isPlaybackActiveForUi(),
                 nextDisplayMode = LegacySongsSortDisplayMode.Name,
                 nextSectionMode = LegacySongsSectionMode.None,
                 nextQuickBarCollapsedVisibleWidth = 0,
@@ -802,7 +753,7 @@ private fun CloudMusicResultListView(
                         override fun onEvents(player: Player, events: Player.Events) {
                             adapter.setPlaybackState(
                                 nextCurrentMediaId = player.currentMediaItem?.mediaId,
-                                nextCurrentIsPlaying = player.isPlaying,
+                                nextCurrentIsPlaying = player.isPlaybackActiveForUi(),
                             )
                             adapter.updateVisiblePlaybackState(listView)
                         }

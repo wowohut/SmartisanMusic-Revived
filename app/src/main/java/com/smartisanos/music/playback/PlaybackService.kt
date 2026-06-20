@@ -36,7 +36,6 @@ import com.smartisanos.music.data.library.LibraryExclusions
 import com.smartisanos.music.data.library.LibraryExclusionsStore
 import com.smartisanos.music.data.online.OnlineMusicRepositoryRouter
 import com.smartisanos.music.data.online.OnlineTrackIdentity
-import com.smartisanos.music.data.online.buildOnlineMediaId
 import com.smartisanos.music.data.online.isOnlineMediaItem
 import com.smartisanos.music.data.online.isNeteasePreviewDuration
 import com.smartisanos.music.data.online.onlinePlaybackUriIdentityOrNull
@@ -48,6 +47,7 @@ import com.smartisanos.music.data.playback.PlaybackStatsRepository
 import com.smartisanos.music.data.settings.PlaybackSettingsStore
 import com.smartisanos.music.isExternalAudioLaunchItem
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -58,8 +58,6 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import java.io.IOException
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 class PlaybackService : MediaLibraryService() {
@@ -77,10 +75,12 @@ class PlaybackService : MediaLibraryService() {
     private var playbackSessionStateCoordinator: PlaybackSessionStateCoordinator? = null
     private var playbackPlayCountTracker: PlaybackPlayCountTracker? = null
     private var playbackAudioFxController: PlaybackAudioFxController? = null
+    private var playbackMetadataPreloader: PlaybackMetadataPreloader? = null
     private var mediaSessionArtworkBitmapLoader: MediaSessionArtworkBitmapLoader? = null
     private var pendingStatsLibraryRefreshJob: Job? = null
     private var pendingRatingLibraryRefreshJob: Job? = null
     private var onlineMediaRefreshJob: Job? = null
+    private var onlineMediaRefreshJobForceRefresh = false
     private var lastOnlineMediaRefreshKey: String? = null
     private var lastOnlineMediaRefreshAtMs: Long = 0L
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -144,6 +144,7 @@ class PlaybackService : MediaLibraryService() {
             .build()
             .apply {
                 setWakeMode(C.WAKE_MODE_NETWORK)
+                setPreloadConfiguration(ExoPlayer.PreloadConfiguration(PlaylistPreloadDurationUs))
             }
         val artworkBitmapLoader = MediaSessionArtworkBitmapLoader(this)
 
@@ -153,6 +154,13 @@ class PlaybackService : MediaLibraryService() {
         }
         exoPlayer.addListener(audioFxPlayerListener)
         exoPlayer.addListener(onlineMediaRefreshListener)
+        playbackMetadataPreloader = PlaybackMetadataPreloader(
+            context = this,
+            player = exoPlayer,
+            scope = serviceScope,
+        ).also { preloader ->
+            preloader.start()
+        }
         mediaSessionArtworkBitmapLoader = artworkBitmapLoader
         mediaLibrarySession = MediaLibrarySession.Builder(
             this,
@@ -233,6 +241,8 @@ class PlaybackService : MediaLibraryService() {
         pendingStatsLibraryRefreshJob = null
         pendingRatingLibraryRefreshJob?.cancel()
         pendingRatingLibraryRefreshJob = null
+        playbackMetadataPreloader?.stop()
+        playbackMetadataPreloader = null
         serviceScope.cancel()
         PlaybackSleepTimer.cancel()
         player?.removeListener(audioFxPlayerListener)
@@ -308,9 +318,7 @@ class PlaybackService : MediaLibraryService() {
         val localQueueKeys = queueKeys.filterNot { key ->
             key.mediaId.onlineTrackIdentityOrNull() != null
         }
-        val onlineItems = runBlocking {
-            restoreOnlineItemsByQueueKeys(queueKeys)
-        }
+        val onlineItems = restoreOnlineItemsByQueueKeys(queueKeys)
         val localItems = if (hasAudioPermission() && localQueueKeys.isNotEmpty()) {
             val exclusions = if (exclusionsReady.isCompleted) {
                 exclusionsSnapshot
@@ -335,7 +343,7 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
-    private suspend fun restoreOnlineItemsByQueueKeys(
+    private fun restoreOnlineItemsByQueueKeys(
         queueKeys: List<PlaybackQueueSnapshotItem>,
     ): List<MediaItem> {
         val identities = queueKeys
@@ -346,17 +354,7 @@ class PlaybackService : MediaLibraryService() {
         if (identities.isEmpty()) {
             return emptyList()
         }
-        val resolvedItems = runCatching {
-            onlineMusicRepository.resolvePlayableItems(
-                identities = identities,
-                includeLyrics = false,
-            )
-        }.getOrDefault(emptyList())
-        val resolvedItemsByMediaId = resolvedItems.associateBy(MediaItem::mediaId)
-        return identities.map { identity ->
-            val mediaId = buildOnlineMediaId(identity.source, identity.trackId)
-            resolvedItemsByMediaId[mediaId] ?: identity.toOnlinePlaybackPlaceholderMediaItem()
-        }
+        return identities.map(OnlineTrackIdentity::toOnlinePlaybackPlaceholderMediaItem)
     }
 
     private fun createSessionActivityPendingIntent(): PendingIntent {
@@ -382,9 +380,6 @@ class PlaybackService : MediaLibraryService() {
         if (!currentItem.isOnlineMediaItem()) {
             return
         }
-        if (onlineMediaRefreshJob?.isActive == true) {
-            return
-        }
 
         val refreshKey = currentItem.mediaId.takeIf(String::isNotBlank) ?: return
         if (!recordOnlineMediaRefreshAttempt(refreshKey)) {
@@ -398,6 +393,7 @@ class PlaybackService : MediaLibraryService() {
             resumePlayback = playbackPlayer.playWhenReady,
             prepareAfterReplace = true,
             forceRefresh = true,
+            skipOnFailure = true,
         )
     }
 
@@ -481,20 +477,40 @@ class PlaybackService : MediaLibraryService() {
         resumePlayback: Boolean,
         prepareAfterReplace: Boolean,
         forceRefresh: Boolean,
+        skipOnFailure: Boolean = false,
     ) {
-        if (onlineMediaRefreshJob?.isActive == true) {
-            return
+        val activeRefreshJob = onlineMediaRefreshJob
+        if (activeRefreshJob?.isActive == true) {
+            if (!forceRefresh || onlineMediaRefreshJobForceRefresh) {
+                return
+            }
+            activeRefreshJob.cancel()
         }
         if (!item.isOnlineMediaItem()) {
             return
         }
-        if (!forceRefresh && item.localConfiguration?.uri != null) {
+        if (!forceRefresh && !item.shouldRefreshOnlinePlaybackUrl()) {
             return
         }
-        onlineMediaRefreshJob = serviceScope.launch {
-            val refreshedItem = runCatching {
-                onlineMusicRepository.resolvePlayableMediaItem(item)
-            }.getOrNull() ?: return@launch
+        var resolveAdjacentAfterCompletion = false
+        val refreshJob = serviceScope.launch {
+            val refreshedItem = try {
+                onlineMusicRepository.resolvePlayableMediaItem(
+                    mediaItem = item,
+                    includeLyrics = false,
+                    forceRefresh = forceRefresh,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
+            if (refreshedItem == null) {
+                if (skipOnFailure) {
+                    skipCurrentOnlineMediaItemAfterError(item.mediaId)
+                }
+                return@launch
+            }
             val activePlayer = player ?: return@launch
             val targetIndex = itemIndex.takeIf { it in 0 until activePlayer.mediaItemCount }
                 ?: return@launch
@@ -519,7 +535,44 @@ class PlaybackService : MediaLibraryService() {
                 if (targetPlayWhenReady) {
                     activePlayer.play()
                 }
+                resolveAdjacentAfterCompletion = true
             }
+        }
+        onlineMediaRefreshJob = refreshJob
+        onlineMediaRefreshJobForceRefresh = forceRefresh
+        refreshJob.invokeOnCompletion {
+            if (onlineMediaRefreshJob === refreshJob) {
+                onlineMediaRefreshJob = null
+                onlineMediaRefreshJobForceRefresh = false
+            }
+            if (resolveAdjacentAfterCompletion) {
+                serviceScope.launch {
+                    resolveAdjacentOnlineMediaItem()
+                }
+            }
+        }
+    }
+
+    private fun skipCurrentOnlineMediaItemAfterError(mediaId: String) {
+        val playbackPlayer = player ?: return
+        val currentItem = playbackPlayer.currentMediaItem ?: return
+        if (currentItem.mediaId != mediaId) {
+            return
+        }
+        if (
+            !shouldSkipOnlinePlaybackError(
+                isCurrentOnline = currentItem.isOnlineMediaItem(),
+                hasNextMediaItem = playbackPlayer.hasNextMediaItem(),
+                repeatMode = playbackPlayer.repeatMode,
+            )
+        ) {
+            return
+        }
+        val resumePlayback = playbackPlayer.playWhenReady
+        playbackPlayer.seekToNextMediaItem()
+        playbackPlayer.prepare()
+        if (resumePlayback) {
+            playbackPlayer.play()
         }
     }
 
@@ -784,6 +837,7 @@ class PlaybackService : MediaLibraryService() {
         private const val StatsLibraryRefreshDebounceMs = 600L
         private const val RatingLibraryRefreshDebounceMs = 250L
         private const val OnlineMediaRefreshCooldownMs = 30_000L
+        private const val PlaylistPreloadDurationUs = 12_000_000L
     }
 }
 
@@ -791,48 +845,18 @@ private class OnlinePlaybackDataSpecResolver(
     private val onlineMusicRepository: OnlineMusicRepositoryRouter,
 ) : ResolvingDataSource.Resolver {
 
-    private val resolvedUris = ConcurrentHashMap<OnlineTrackIdentity, CachedOnlinePlaybackUri>()
-
     override fun resolveDataSpec(dataSpec: DataSpec): DataSpec {
         val identity = dataSpec.uri.onlinePlaybackUriIdentityOrNull() ?: return dataSpec
         return dataSpec.withUri(resolvePlaybackUri(identity))
     }
 
     override fun resolveReportedUri(uri: Uri): Uri {
-        return uri.onlinePlaybackUriIdentityOrNull()
-            ?.let { identity -> resolvedUris[identity]?.uri }
-            ?: uri
+        return uri
     }
 
     private fun resolvePlaybackUri(identity: OnlineTrackIdentity): Uri {
-        val nowMs = SystemClock.elapsedRealtime()
-        resolvedUris[identity]
-            ?.takeIf { cached -> cached.expiresAtMs > nowMs }
-            ?.let { cached -> return cached.uri }
-
-        val resolvedUri = runBlocking(Dispatchers.IO) {
-            onlineMusicRepository.resolvePlayableItems(
-                identities = listOf(identity),
-                includeLyrics = false,
-            )
-                .firstOrNull()
-                ?.localConfiguration
-                ?.uri
-        } ?: throw IOException(
-            "Unable to resolve online playback uri for ${identity.source}/${identity.trackId}",
-        )
-
-        resolvedUris[identity] = CachedOnlinePlaybackUri(
-            uri = resolvedUri,
-            expiresAtMs = nowMs + OnlinePlaybackDataSpecCacheTtlMs,
-        )
-        return resolvedUri
+        return runBlocking(Dispatchers.IO) {
+            onlineMusicRepository.resolvePlaybackUri(identity)
+        }
     }
 }
-
-private data class CachedOnlinePlaybackUri(
-    val uri: Uri,
-    val expiresAtMs: Long,
-)
-
-private const val OnlinePlaybackDataSpecCacheTtlMs = 10 * 60 * 1000L

@@ -71,7 +71,6 @@ internal fun CloudMusicSearchResultsContent(
     selectedCategory: CloudSearchCategory,
     onCategoryChange: (CloudSearchCategory) -> Unit,
     repository: OnlineMusicProviderRepository,
-    authLoggedIn: Boolean,
     active: Boolean,
     playbackBarOverlayHeight: Dp,
     onRetryClick: () -> Unit,
@@ -138,10 +137,6 @@ internal fun CloudMusicSearchResultsContent(
                             CloudMusicResultList(
                                 tracks = state.results.tracks,
                                 repository = repository,
-                                playFailedMessageRes = when {
-                                    !authLoggedIn -> R.string.cloud_music_login_in_settings
-                                    else -> R.string.netease_online_music_play_failed
-                                },
                                 active = active,
                                 playbackBarOverlayHeight = playbackBarOverlayHeight,
                                 onTrackMoreClick = onTrackMoreClick,

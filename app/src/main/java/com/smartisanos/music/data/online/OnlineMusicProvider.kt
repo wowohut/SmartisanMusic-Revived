@@ -2,6 +2,9 @@ package com.smartisanos.music.data.online
 
 import android.net.Uri
 import androidx.media3.common.MediaItem
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+import java.io.IOException
 
 internal enum class OnlineMusicProvider(
     val sourceId: String,
@@ -136,8 +139,44 @@ internal data class OnlineSearchHotKeyword(
     val score: Long = 0L,
 )
 
+internal enum class OnlinePlaybackFailureReason {
+    LoginRequired,
+    PreviewOnly,
+    Unavailable,
+}
+
+internal class OnlinePlaybackResolutionException(
+    val reason: OnlinePlaybackFailureReason,
+    message: String,
+) : IOException(message)
+
+internal fun Throwable.onlinePlaybackFailureReasonOrNull(): OnlinePlaybackFailureReason? {
+    var cause: Throwable? = this
+    while (cause != null) {
+        if (cause is OnlinePlaybackResolutionException) {
+            return cause.reason
+        }
+        cause = cause.cause
+    }
+    return null
+}
+
+internal enum class OnlineCacheRefreshEventKind {
+    Started,
+    Finished,
+}
+
+internal data class OnlineCacheRefreshEvent(
+    val provider: OnlineMusicProvider,
+    val cacheKey: String,
+    val kind: OnlineCacheRefreshEventKind,
+)
+
 internal interface OnlineMusicProviderRepository {
     val provider: OnlineMusicProvider
+
+    val cacheRefreshEvents: Flow<OnlineCacheRefreshEvent>
+        get() = emptyFlow()
 
     suspend fun search(query: String): List<OnlineTrack>
 
@@ -236,14 +275,21 @@ internal interface OnlineMusicProviderRepository {
 
     suspend fun lyrics(identity: OnlineTrackIdentity): OnlineLyrics? = null
 
-    suspend fun resolvePlayableMediaItem(mediaItem: MediaItem): MediaItem?
+    suspend fun resolvePlayableMediaItem(
+        mediaItem: MediaItem,
+        includeLyrics: Boolean = true,
+        forceRefresh: Boolean = false,
+    ): MediaItem?
 
     suspend fun resolvePlayableMediaItems(
         mediaItems: List<MediaItem>,
         includeLyrics: Boolean = false,
     ): List<MediaItem> {
         return mediaItems.mapNotNull { item ->
-            resolvePlayableMediaItem(item)
+            resolvePlayableMediaItem(
+                mediaItem = item,
+                includeLyrics = includeLyrics,
+            )
         }
     }
 }

@@ -62,6 +62,7 @@ import com.smartisanos.music.data.library.LibraryExclusions
 import com.smartisanos.music.data.library.LibraryExclusionsStore
 import com.smartisanos.music.playback.LocalAudioLibrary
 import com.smartisanos.music.playback.LocalPlaybackBrowser
+import com.smartisanos.music.playback.isPlaybackActiveForUi
 import com.smartisanos.music.playback.replaceQueueAndPlay
 import com.smartisanos.music.playback.replaceQueueAndPlayShuffled
 import com.smartisanos.music.ui.components.hasAudioPermission
@@ -868,7 +869,7 @@ private fun LegacyFolderDetailPage(
             root.bind(
                 tracks = tracks,
                 currentMediaId = browser?.currentMediaItem?.mediaId,
-                currentIsPlaying = browser?.isPlaying == true,
+                currentIsPlaying = browser.isPlaybackActiveForUi(),
                 onPlayAll = {
                     if (tracks.isNotEmpty()) {
                         browser.replaceQueueAndPlay(tracks)
@@ -1005,7 +1006,7 @@ private class LegacyFolderDetailRootView(context: Context) : LinearLayout(contex
                     override fun onEvents(player: Player, events: Player.Events) {
                         adapter.setPlaybackState(
                             nextCurrentMediaId = player.currentMediaItem?.mediaId,
-                            nextCurrentIsPlaying = player.isPlaying,
+                            nextCurrentIsPlaying = player.isPlaybackActiveForUi(),
                         )
                         adapter.updateVisiblePlaybackState(listView)
                     }

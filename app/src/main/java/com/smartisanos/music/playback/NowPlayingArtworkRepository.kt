@@ -3,6 +3,7 @@ package com.smartisanos.music.playback
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.SystemClock
 import android.util.LruCache
 import android.util.Size
 import androidx.media3.common.MediaItem
@@ -15,8 +16,13 @@ import coil3.request.bitmapConfig
 import coil3.request.crossfade
 import coil3.size.Precision
 import coil3.toBitmap
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 
 internal object NowPlayingArtworkRepository {
     private val cache = object : LruCache<ArtworkCacheKey, Bitmap>(artworkCacheSizeKb()) {
@@ -24,6 +30,9 @@ internal object NowPlayingArtworkRepository {
             return value.byteCount / 1024
         }
     }
+    private val missingIdentities = LruCache<ArtworkRequestKey, Long>(MissingArtworkIdentityCacheSize)
+    private val inFlightLoads = ConcurrentHashMap<ArtworkCacheKey, Deferred<Bitmap?>>()
+    private val loadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun peek(
         mediaItem: MediaItem,
@@ -47,19 +56,39 @@ internal object NowPlayingArtworkRepository {
         context: Context,
         mediaItem: MediaItem,
         size: Size,
-    ): Bitmap? = withContext(Dispatchers.IO) {
+        rememberMissing: Boolean = true,
+    ): Bitmap? {
         val appContext = context.applicationContext
         val identity = mediaItem.artworkRequestKey()
         val cacheKey = ArtworkCacheKey(identity, size.width, size.height)
-        cache.get(cacheKey)?.let { return@withContext it }
+        cache.get(cacheKey)?.let { return it }
         val reusableBitmap = peek(mediaItem, size)
+        if (isRecentlyMissing(identity)) {
+            return reusableBitmap
+        }
 
-        val bitmap = loadBitmap(appContext, mediaItem, size)
-            ?.also { loaded ->
-                loaded.prepareToDraw()
-                cache.put(cacheKey, loaded)
-            }
-        bitmap ?: reusableBitmap
+        val bitmap = loadCoalesced(cacheKey) {
+            loadBitmap(appContext, mediaItem, size)
+        }?.also { loaded ->
+            loaded.prepareToDraw()
+            cache.put(cacheKey, loaded)
+            missingIdentities.remove(identity)
+        }
+        if (bitmap == null && rememberMissing) {
+            missingIdentities.put(identity, SystemClock.elapsedRealtime())
+        }
+        return bitmap ?: reusableBitmap
+    }
+
+    suspend fun preload(context: Context, mediaItem: MediaItem) {
+        for (size in NowPlayingArtworkPreloadSizes) {
+            load(
+                context = context,
+                mediaItem = mediaItem,
+                size = size,
+                rememberMissing = false,
+            )
+        }
     }
 
     private suspend fun loadBitmap(
@@ -104,6 +133,31 @@ internal object NowPlayingArtworkRepository {
             ).scaledToFit(size)
         }.getOrNull()
     }
+
+    private fun isRecentlyMissing(identity: ArtworkRequestKey): Boolean {
+        val missingAtMs = missingIdentities.get(identity) ?: return false
+        return SystemClock.elapsedRealtime() - missingAtMs < MissingArtworkCooldownMs
+    }
+
+    private suspend fun loadCoalesced(
+        cacheKey: ArtworkCacheKey,
+        loader: suspend () -> Bitmap?,
+    ): Bitmap? {
+        val newLoad = loadScope.async(start = CoroutineStart.LAZY) {
+            cache.get(cacheKey) ?: loader()
+        }
+        val activeLoad = inFlightLoads.putIfAbsent(cacheKey, newLoad)
+        val load = activeLoad ?: newLoad.also { pendingLoad ->
+            pendingLoad.invokeOnCompletion {
+                inFlightLoads.remove(cacheKey, pendingLoad)
+            }
+            pendingLoad.start()
+        }
+        if (activeLoad != null) {
+            newLoad.cancel()
+        }
+        return load.await()
+    }
 }
 
 private data class ArtworkCacheKey(
@@ -132,3 +186,10 @@ private fun artworkCacheSizeKb(): Int {
     val maxMemoryKb = (Runtime.getRuntime().maxMemory() / 1024).toInt()
     return (maxMemoryKb / 16).coerceAtLeast(4 * 1024)
 }
+
+private val NowPlayingArtworkPreloadSizes = listOf(
+    Size(512, 512),
+    Size(128, 128),
+)
+private const val MissingArtworkIdentityCacheSize = 128
+private const val MissingArtworkCooldownMs = 5 * 60 * 1000L

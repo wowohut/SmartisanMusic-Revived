@@ -63,13 +63,13 @@ import com.smartisanos.music.data.settings.PlaybackSettings
 import com.smartisanos.music.isExternalAudioLaunchItem
 import com.smartisanos.music.playback.EmbeddedLyrics
 import com.smartisanos.music.playback.LocalPlaybackController
+import com.smartisanos.music.playback.NowPlayingLyricsRepository
 import com.smartisanos.music.playback.PlaybackSleepTimer
 import com.smartisanos.music.playback.artworkRequestKey
 import com.smartisanos.music.playback.await
 import com.smartisanos.music.playback.cancelSleepTimer
 import com.smartisanos.music.playback.extractEmbeddedLyrics
 import com.smartisanos.music.playback.invalidateLibrary
-import com.smartisanos.music.playback.loadEmbeddedLyrics
 import com.smartisanos.music.playback.removeMediaItemsByMediaIds
 import com.smartisanos.music.playback.setScratchSeekModeEnabled
 import com.smartisanos.music.playback.startSleepTimer
@@ -550,13 +550,15 @@ fun PlaybackScreen(
         controllerTracks?.let(::extractEmbeddedLyrics)
     }
     val embeddedLyrics by produceState<EmbeddedLyrics?>(
-        initialValue = trackLyrics,
+        initialValue = trackLyrics ?: state.mediaItem?.let(NowPlayingLyricsRepository::peek),
         key1 = state.mediaItem?.mediaId,
         key2 = state.mediaItem?.localConfiguration?.uri,
         key3 = trackLyrics,
     ) {
-        value = trackLyrics ?: state.mediaItem?.let { mediaItem ->
-            loadEmbeddedLyrics(context, mediaItem)
+        val mediaItem = state.mediaItem
+        value = trackLyrics ?: mediaItem?.let(NowPlayingLyricsRepository::peek)
+        if (trackLyrics == null && mediaItem != null) {
+            value = NowPlayingLyricsRepository.load(context, mediaItem)
         }
     }
     val artworkRequestKey = state.mediaItem?.artworkRequestKey()
@@ -751,7 +753,7 @@ fun PlaybackScreen(
                     embeddedLyrics = embeddedLyrics,
                     fallbackLyricsLines = fallbackLyricsLines,
                     hasMediaItem = state.mediaItem != null,
-                    isPlaying = state.isPlaying,
+                    isPlaying = state.isPlaybackActive,
                     coverDragMode = coverPageState.dragMode,
                     previewPositionMs = coverPageState.previewPositionMs,
                     needlePreviewRotationDegrees = coverPageState.needlePreviewRotationDegrees,
@@ -776,7 +778,7 @@ fun PlaybackScreen(
                     onDiscScratchStart = {
                         scratchFlingJob?.cancel()
                         scratchFlingJob = null
-                        val resumePlaybackAfterDrag = state.isPlaying ||
+                        val resumePlaybackAfterDrag = state.isPlaybackActive ||
                             coverPageState.resumePlaybackAfterDrag
                         coverPageState = coverPageState.copy(
                             dragMode = CoverDragMode.DiscScratch,
@@ -818,7 +820,7 @@ fun PlaybackScreen(
                     },
                     onNeedleSeekStart = { rotationDegrees, positionMs ->
                         LegacyPlaybackHaptics.vibrateEffect(context)
-                        val resumePlaybackAfterDrag = state.isPlaying
+                        val resumePlaybackAfterDrag = state.isPlaybackActive
                         coverPageState = coverPageState.copy(
                             dragMode = CoverDragMode.NeedleSeek,
                             previewPositionMs = positionMs ?: 0L,
@@ -829,7 +831,11 @@ fun PlaybackScreen(
                         )
                         if (resumePlaybackAfterDrag) {
                             controller?.pause()
-                            state = state.copy(isPlaying = false)
+                            state = state.copy(
+                                isPlaying = false,
+                                playWhenReady = false,
+                                isBuffering = false,
+                            )
                         }
                         controller?.setScratchSeekModeEnabled(true)
                     },
@@ -855,7 +861,12 @@ fun PlaybackScreen(
                             controller?.seekTo(0L)
                             controller?.pause()
                             livePositionMs = 0L
-                            state = state.copy(isPlaying = false, currentPositionMs = 0L)
+                            state = state.copy(
+                                isPlaying = false,
+                                playWhenReady = false,
+                                isBuffering = false,
+                                currentPositionMs = 0L,
+                            )
                         } else {
                             coverPageState = coverPageState.copy(
                                 dragMode = CoverDragMode.None,
@@ -869,6 +880,8 @@ fun PlaybackScreen(
                             livePositionMs = positionMs
                             state = state.copy(
                                 isPlaying = resumePlaybackAfterDrag,
+                                playWhenReady = resumePlaybackAfterDrag,
+                                isBuffering = false,
                                 currentPositionMs = positionMs,
                             )
                             if (resumePlaybackAfterDrag) {
@@ -900,7 +913,7 @@ fun PlaybackScreen(
                     controller?.seekToPrevious()
                 },
                 onPlayPauseClick = {
-                    if (state.isPlaying) {
+                    if (state.isPlaybackActive) {
                         controller?.pause()
                     } else {
                         controller?.play()

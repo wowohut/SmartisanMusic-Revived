@@ -128,6 +128,7 @@
     <string name="cloud_music_account_playlists_loading">正在载入我的音乐</string>
     <string name="cloud_music_account_playlists_error">我的音乐暂时无法载入</string>
     <string name="cloud_music_featured_loading">正在载入云音乐</string>
+    <string name="cloud_music_cache_refreshing">已显示缓存内容，正在更新</string>
     <string name="cloud_music_featured_error">云音乐暂时无法载入</string>
     <string name="cloud_music_loading">正在搜索</string>
     <string name="cloud_music_no_result">无搜索结果</string>
@@ -248,6 +249,8 @@
     <string name="netease_playlist_edit_action">编辑歌单</string>
     <string name="netease_playlist_delete_single_confirm">确认删除此歌单？</string>
     <string name="online_music_play_failed">无法播放该在线音乐</string>
+    <string name="online_music_play_login_required">请登录网易云音乐后再播放</string>
+    <string name="online_music_play_preview_only">当前只返回试听片段，请确认账号权限</string>
     <string name="search_no_result">无搜索结果</string>
     <string name="search_no_result_subtitle">没有找到相关歌曲、专辑或艺术家</string>
     <string name="library_root">本地音乐</string>
@@ -341,6 +344,7 @@
     <string name="artist_custom_separator_hint">自定义</string>
     <string name="popcorn_sound_tips">播放时会模仿真实唱片磨损，产生一种类似雨点的“爆豆音”杂声</string>
     <string name="playback_more_primary_line">暂无歌词</string>
+    <string name="playback_buffering">正在缓冲</string>
     <string name="setting_stop_time">设定定时播放时间</string>
     <string name="time_no">无</string>
     <string name="time_15m">15 分钟</string>

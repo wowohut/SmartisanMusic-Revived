@@ -142,7 +142,7 @@ internal fun PlaybackBottomControls(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             PlaybackControlButtons(
-                isPlaying = state.isPlaying,
+                isPlaying = state.isPlaybackActive,
                 repeatMode = state.repeatMode,
                 shuffleEnabled = state.shuffleEnabled,
                 controlWidth = width,

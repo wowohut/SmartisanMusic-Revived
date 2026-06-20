@@ -2,6 +2,14 @@ package com.smartisanos.music.data.online
 
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -20,6 +28,97 @@ class OnlineCacheBehaviorTest {
             buildOnlineMediaId(identity.source, identity.trackId),
             identity.toOnlinePlaybackCacheKey(),
         )
+    }
+
+    @Test
+    fun memoryCacheCoalescesConcurrentLoadsForSameKey() = runBlocking {
+        val calls = AtomicInteger(0)
+        val key = "test:coalesce:${System.nanoTime()}"
+
+        val values = coroutineScope {
+            List(8) {
+                async {
+                    NeteaseOnlineMemoryCache.getOrLoad(
+                        key = key,
+                        ttlMs = 60_000L,
+                    ) {
+                        calls.incrementAndGet()
+                        delay(25L)
+                        "loaded"
+                    }
+                }
+            }.awaitAll()
+        }
+
+        assertEquals(List(8) { "loaded" }, values)
+        assertEquals(1, calls.get())
+    }
+
+    @Test
+    fun memoryCacheCoalescesConcurrentNullLoadsWithoutCachingResult() = runBlocking {
+        val calls = AtomicInteger(0)
+        val key = "test:coalesce-null:${System.nanoTime()}"
+
+        val values = coroutineScope {
+            List(8) {
+                async {
+                    NeteaseOnlineMemoryCache.getOrLoadNonNull<String>(
+                        key = key,
+                        ttlMs = 60_000L,
+                    ) {
+                        calls.incrementAndGet()
+                        delay(25L)
+                        null
+                    }
+                }
+            }.awaitAll()
+        }
+        val retryValue = NeteaseOnlineMemoryCache.getOrLoadNonNull(
+            key = key,
+            ttlMs = 60_000L,
+        ) {
+            calls.incrementAndGet()
+            "retry-loaded"
+        }
+
+        assertEquals(List<String?>(8) { null }, values)
+        assertEquals("retry-loaded", retryValue)
+        assertEquals(2, calls.get())
+    }
+
+    @Test
+    fun memoryCacheCoalescedLoadSurvivesFirstAwaiterCancellation() = runBlocking {
+        val calls = AtomicInteger(0)
+        val key = "test:coalesce-cancel:${System.nanoTime()}"
+        val started = CompletableDeferred<Unit>()
+        val allowFinish = CompletableDeferred<Unit>()
+
+        val firstAwaiter = launch {
+            NeteaseOnlineMemoryCache.getOrLoadNonNull(
+                key = key,
+                ttlMs = 60_000L,
+            ) {
+                calls.incrementAndGet()
+                started.complete(Unit)
+                allowFinish.await()
+                "loaded-after-cancel"
+            }
+        }
+        started.await()
+        firstAwaiter.cancelAndJoin()
+        val secondAwaiter = async {
+            NeteaseOnlineMemoryCache.getOrLoadNonNull<String>(
+                key = key,
+                ttlMs = 60_000L,
+            ) {
+                calls.incrementAndGet()
+                "duplicate-load"
+            }
+        }
+        allowFinish.complete(Unit)
+
+        assertEquals("loaded-after-cancel", secondAwaiter.await())
+        assertEquals(1, calls.get())
     }
 
     @Test
@@ -76,6 +175,33 @@ class OnlineCacheBehaviorTest {
             )
 
             assertNull(expiredWriter.get(identity))
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun lyricsDiskCacheDoesNotPersistEmptyLyrics() = runBlocking {
+        val directory = createTempCacheDirectory()
+        try {
+            val cache = OnlineLyricsDiskCache(
+                directory = directory,
+                ttlMs = 60_000L,
+            )
+            val identity = OnlineTrackIdentity(
+                source = OnlineMusicProvider.Netease.sourceId,
+                trackId = "empty",
+            )
+
+            cache.put(
+                identity = identity,
+                lyrics = OnlineLyrics(
+                    lyric = null,
+                    translatedLyric = null,
+                ),
+            )
+
+            assertNull(cache.get(identity))
         } finally {
             directory.deleteRecursively()
         }
