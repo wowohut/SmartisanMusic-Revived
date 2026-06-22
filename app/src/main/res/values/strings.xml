@@ -128,7 +128,6 @@
     <string name="cloud_music_account_playlists_loading">正在载入我的音乐</string>
     <string name="cloud_music_account_playlists_error">我的音乐暂时无法载入</string>
     <string name="cloud_music_featured_loading">正在载入云音乐</string>
-    <string name="cloud_music_cache_refreshing">已显示缓存内容，正在更新</string>
     <string name="cloud_music_featured_error">云音乐暂时无法载入</string>
     <string name="cloud_music_loading">正在搜索</string>
     <string name="cloud_music_no_result">无搜索结果</string>

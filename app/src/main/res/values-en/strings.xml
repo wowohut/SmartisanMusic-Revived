@@ -135,7 +135,6 @@
     <string name="cloud_music_account_playlists_loading">Loading my music</string>
     <string name="cloud_music_account_playlists_error">My music is unavailable</string>
     <string name="cloud_music_featured_loading">Loading Cloud Music</string>
-    <string name="cloud_music_cache_refreshing">Showing cached content, updating</string>
     <string name="cloud_music_featured_error">Cloud Music is unavailable</string>
     <string name="cloud_music_loading">Searching</string>
     <string name="cloud_music_no_result">No results</string>
