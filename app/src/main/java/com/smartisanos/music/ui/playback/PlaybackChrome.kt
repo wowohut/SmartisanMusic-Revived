@@ -369,6 +369,10 @@ private data class PlaybackControlButtonMetrics(
     val height: Dp,
 )
 
+internal val PlaybackBottomControlsMinimumWidth =
+    (OriginalTurntableBaseWidthDp * PlaybackMinimumTouchTargetSize.value /
+        PlaybackControlOuterButtonBaseWidthDp).dp
+
 private fun playbackControlButtonMetrics(controlWidth: Dp): PlaybackControlButtonMetrics {
     val width = controlWidth.value
     return when {
@@ -387,14 +391,19 @@ private fun playbackControlButtonMetrics(controlWidth: Dp): PlaybackControlButto
         else -> {
             val scale = width / OriginalTurntableBaseWidthDp
             PlaybackControlButtonMetrics(
-                outerWidth = 67.3.dp * scale,
-                sideWidth = 70.dp * scale,
-                playWidth = 85.3.dp * scale,
-                height = 87.dp * scale,
+                outerWidth = PlaybackControlOuterButtonBaseWidthDp.dp * scale,
+                sideWidth = PlaybackControlSideButtonBaseWidthDp.dp * scale,
+                playWidth = PlaybackControlPlayButtonBaseWidthDp.dp * scale,
+                height = PlaybackControlButtonBaseHeightDp.dp * scale,
             )
         }
     }
 }
+
+private const val PlaybackControlOuterButtonBaseWidthDp = 67.3f
+private const val PlaybackControlSideButtonBaseWidthDp = 70f
+private const val PlaybackControlPlayButtonBaseWidthDp = 85.3f
+private const val PlaybackControlButtonBaseHeightDp = 87f
 
 @Composable
 private fun playbackControlEntranceModifier(

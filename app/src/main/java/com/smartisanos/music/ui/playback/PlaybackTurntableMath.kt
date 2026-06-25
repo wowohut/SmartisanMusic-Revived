@@ -66,14 +66,11 @@ internal fun originalNeedleMetrics(turntableScale: Float): OriginalNeedleMetrics
 }
 
 private fun OriginalNeedleMetrics.scaled(scale: Float): OriginalNeedleMetrics {
+    // Shorten the tonearm for compact stages, but keep the asset's cross-axis
+    // width so the 9-patch stylus is not squeezed into a distorted shape.
     return copy(
-        widthDp = widthDp * scale,
         heightDp = heightDp * scale,
-        topWidthDp = topWidthDp * scale,
         topMarginDp = topMarginDp * scale,
-        rightMarginDp = rightMarginDp * scale,
-        shadowRightMarginDp = shadowRightMarginDp * scale,
-        pivotXDp = pivotXDp * scale,
         pivotYDp = pivotYDp * scale,
     )
 }

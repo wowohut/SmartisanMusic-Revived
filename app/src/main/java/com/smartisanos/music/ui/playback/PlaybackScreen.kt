@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -692,7 +693,13 @@ fun PlaybackScreen(
         val bottomInset = with(density) {
             WindowInsets.safeDrawing.getBottom(this).toDp()
         }
-        val bottomControlsWidth = maxWidth
+        var turntableWidth by remember(maxWidth, maxHeight) {
+            mutableStateOf<Dp?>(null)
+        }
+        val bottomControlsMinimumWidth = PlaybackBottomControlsMinimumWidth.coerceAtMost(maxWidth)
+        val bottomControlsWidth = turntableWidth
+            ?.coerceIn(bottomControlsMinimumWidth, maxWidth)
+            ?: maxWidth
         val turntableEntranceProgress = playbackEntranceProgress(
             timeMillis = entranceTimeMillis.value,
             delayMillis = 0,
@@ -888,6 +895,9 @@ fun PlaybackScreen(
                     onNeedleSeekCancel = {
                         LegacyPlaybackHaptics.vibrateEffect(context)
                         resetCoverPageInteraction(resumePlayback = true)
+                    },
+                    onTurntableWidthChanged = { resolvedWidth ->
+                        turntableWidth = resolvedWidth
                     },
                 )
             }

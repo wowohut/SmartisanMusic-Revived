@@ -94,6 +94,7 @@ internal fun PlaybackVisualStage(
     onNeedleSeekPositionChange: (Float, Long?) -> Unit,
     onNeedleSeekEnd: (Float, Long?) -> Unit,
     onNeedleSeekCancel: () -> Unit,
+    onTurntableWidthChanged: (Dp) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(
@@ -103,6 +104,9 @@ internal fun PlaybackVisualStage(
         val turntableWidth = playbackVisualStageWidth(maxWidth, maxHeight)
         if (turntableWidth <= 0.dp) {
             return@BoxWithConstraints
+        }
+        LaunchedEffect(turntableWidth) {
+            onTurntableWidthChanged(turntableWidth)
         }
         val scale = turntableWidth.value / OriginalTurntableBaseWidthDp
         val turntableHeight = turntableWidth * PlaybackTurntableHeightToWidthRatio

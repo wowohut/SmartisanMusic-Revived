@@ -214,7 +214,7 @@ class NeedleSeekMappingTest {
     }
 
     @Test
-    fun `compact turntable scales needle metrics with visual stage`() {
+    fun `compact turntable keeps needle cross axis metrics while shortening vertically`() {
         val turntableScale = 0.75f
         val geometry = playbackNeedleGeometry(
             containerSize = IntSize(width = 270, height = 267),
@@ -223,17 +223,17 @@ class NeedleSeekMappingTest {
             rotationDegrees = 12f,
         )
 
-        assertEquals(OriginalNeedleWidthBaseDp * turntableScale, geometry.width, 0.001f)
+        assertEquals(OriginalNeedleWidthBaseDp, geometry.width, 0.001f)
         assertEquals(OriginalNeedleHeightBaseDp * turntableScale, geometry.height, 0.001f)
         assertEquals(OriginalNeedleTopMarginBaseDp * turntableScale, geometry.top, 0.001f)
         assertEquals(
             270f -
-                (OriginalNeedleRightMarginDp * turntableScale) -
-                (OriginalNeedleWidthBaseDp * turntableScale),
+                OriginalNeedleRightMarginDp -
+                OriginalNeedleWidthBaseDp,
             geometry.left,
             0.001f,
         )
-        assertEquals(OriginalNeedlePivotXDp * turntableScale, geometry.pivotLocal.x, 0.001f)
+        assertEquals(OriginalNeedlePivotXDp, geometry.pivotLocal.x, 0.001f)
         assertEquals(OriginalNeedlePivotYDp * turntableScale, geometry.pivotLocal.y, 0.001f)
     }
 

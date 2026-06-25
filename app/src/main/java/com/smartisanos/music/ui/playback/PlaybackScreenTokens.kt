@@ -78,6 +78,7 @@ internal val PlaybackVolumeBarHeight = 60.dp
 internal val PlaybackVolumeHorizontalPadding = 26.5.dp
 internal val PlaybackVolumeThumbOffset = 5.dp
 internal val PlaybackActionButtonSize = 31.dp
+internal val PlaybackMinimumTouchTargetSize = 48.dp
 internal val PlaybackControlEntranceOffset = 186.dp
 internal val PlaybackControlButtonsTopPadding = 6.dp
 internal val PlaybackBottomControlsVolumeTopPadding = 18.dp
